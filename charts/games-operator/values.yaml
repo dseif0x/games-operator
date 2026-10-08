@@ -18,7 +18,7 @@ nameOverride: ""
 # -- Override the full release name
 fullnameOverride: ""
 
-# -- Public URL of the web UI; cookies and the host allowlist derive from it. With browser.enabled it needs a path (e.g. https://games.example.com/hub): moonlight-web takes the root of the host and the hub lives below the path
+# -- Public URL of the web UI; cookies and the host allowlist derive from it
 publicUrl: https://games.example.com
 # -- Extra allowed Host header values (the publicUrl host is always allowed)
 allowedHosts: []
@@ -89,15 +89,17 @@ apps:
   idleStopAfter: 15m
 
 browser:
-  # -- Deploy moonlight-web (github.com/linckosz/moonlight-web), a Moonlight client that streams into the browser. The hub reverse-proxies it at the root of publicUrl's host, so it shares the Ingress, certificate and any tunnel; set publicUrl to a path such as /hub
+  # -- Deploy the embedded moonlight-web (github.com/dseif0x/moonlight-web, branch games-operator): the Moonlight client that streams into the browser. The hub serves it below `path` on its own host, logs the browser in, and "Play in browser" takes an app straight to its stream
   enabled: false
-  # -- URL of a moonlight-web you run elsewhere, for the "Play in browser" link (only when enabled is false)
+  # -- Path prefix the player is served under on the hub's host
+  path: /play
+  # -- URL of a stock moonlight-web you run elsewhere, for a plain "Play in browser" link (only when enabled is false)
   externalUrl: ""
   image:
-    # -- moonlight-web image
-    repository: ghcr.io/linckosz/moonlight-web
-    # -- moonlight-web tag (a release; there is no `edge`)
-    tag: latest
+    # -- Image of the games-operator fork of moonlight-web (embedded mode)
+    repository: ghcr.io/dseif0x/moonlight-web
+    # -- Fork tag (go-<version>)
+    tag: go-0.1.0
     pullPolicy: IfNotPresent
   # -- Run on the node's network so WebRTC media (UDP 48550-48573) can reach browsers on the LAN directly; off, the stream always uses the WebSocket transport through the hub, which is what a tunnel or a firewall between subnets needs anyway
   hostNetwork: false
@@ -126,7 +128,7 @@ auth:
   adminUsername: admin
   # -- 32 bytes hex used to sign session cookies; generated if empty
   cookieSecret: ""
-  # -- Existing Secret with keys `cookieSecret` and `adminPasswordHash` (or `adminPassword`); skips generation
+  # -- Existing Secret with keys `cookieSecret`, `adminPasswordHash` (or `adminPassword`) and, with browser.enabled, `browserSecret`; skips generation
   existingSecret: ""
 
 persistence:

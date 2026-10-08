@@ -12,9 +12,11 @@ export function AppPage(props: { id: string; user: User; onLogout: () => void })
   const [logs, setLogs] = useState("");
   const [container, setContainer] = useState("app");
   const [error, setError] = useState("");
+  const [browserUrl, setBrowserUrl] = useState("");
 
   const load = () => {
     api.app(props.id).then(setApp).catch((e) => setError((e as Error).message));
+    api.apps().then((r) => setBrowserUrl(r.defaults?.browser_url || "")).catch(() => undefined);
     api.appEvents(props.id).then((r) => setEvents(r.events)).catch(() => undefined);
   };
 
@@ -77,6 +79,11 @@ export function AppPage(props: { id: string; user: User; onLogout: () => void })
             <button class="btn primary" onClick={() => act(() => api.startApp(app.id))} title="Start the pod now so a Moonlight launch streams at once">
               Start
             </button>
+          )}
+          {browserUrl && !app.streaming && (
+            <a class="btn primary" href={`${browserUrl}#app=${app.id}`} title="Start the app if needed and stream it in this browser">
+              ▶ Play in browser
+            </a>
           )}
           {active && (
             <button class="btn danger" onClick={() => act(() => api.stopApp(app.id))}>

@@ -52,6 +52,18 @@ func exercise(t *testing.T, st Store) {
 	if _, err := st.Users().GetByAPITokenHash(ctx, ""); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("empty token must not match: %v", err)
 	}
+	if err := st.Users().SetBrowserTokenHash(ctx, u.ID, "btok"); err != nil {
+		t.Fatal(err)
+	}
+	if byTok, err := st.Users().GetByBrowserTokenHash(ctx, "btok"); err != nil || byTok.ID != u.ID {
+		t.Fatalf("by browser token: %v %+v", err, byTok)
+	}
+	if _, err := st.Users().GetByAPITokenHash(ctx, "btok"); !errors.Is(err, ErrNotFound) {
+		t.Fatal("browser token must not pass as api token")
+	}
+	if _, err := st.Users().GetByBrowserTokenHash(ctx, ""); !errors.Is(err, ErrNotFound) {
+		t.Fatal("empty browser token must not match")
+	}
 
 	a := &App{OwnerID: u.ID, MoonlightID: 42, Name: "Steam", Preset: "steam", Image: "ghcr.io/games-on-whales/steam:edge", PVCSize: "50Gi"}
 	if err := st.Apps().Create(ctx, a); err != nil {
@@ -129,6 +141,23 @@ func exercise(t *testing.T, st Store) {
 	}
 	if err := st.Pairings().Delete(ctx, "00000000-0000-4000-8000-000000000002", "fp"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("delete by other user: %v", err)
+	}
+	// Browser pairings follow whoever presses Play.
+	bob, _ := st.Users().UpsertPassword(ctx, "bob", "h")
+	if err := st.Pairings().Upsert(ctx, &Pairing{ID: "mw", UserID: bob.ID, CertPEM: "c", Name: "moonlight-web", Via: PairingViaBrowser}); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := st.Pairings().Reassign(ctx, PairingViaBrowser, u.ID); err != nil || n != 1 {
+		t.Fatalf("reassign: %v %d", err, n)
+	}
+	if mw, err := st.Pairings().Get(ctx, "mw"); err != nil || mw.UserID != u.ID || mw.Via != PairingViaBrowser {
+		t.Fatalf("reassigned pairing: %v %+v", err, mw)
+	}
+	if n, _ := st.Pairings().Reassign(ctx, PairingViaBrowser, u.ID); n != 0 {
+		t.Fatalf("reassign is idempotent: %d", n)
+	}
+	if list, _ := st.Pairings().List(ctx, bob.ID); len(list) != 0 {
+		t.Fatal("bob must have lost the browser pairing")
 	}
 	if err := st.Pairings().Delete(ctx, u.ID, "fp"); err != nil {
 		t.Fatal(err)

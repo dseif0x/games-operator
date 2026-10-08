@@ -35,6 +35,7 @@ type PendingPair struct {
 type pinSubmission struct {
 	pin    string
 	userID string
+	via    string
 }
 
 type pairState struct {
@@ -45,6 +46,7 @@ type pairState struct {
 	serverChallenge []byte
 	clientHash      []byte
 	userID          string
+	via             string
 }
 
 type pending struct {
@@ -81,7 +83,9 @@ func (m *PairingManager) Pending() []PendingPair {
 
 // SubmitPin delivers the PIN a user typed for the pairing identified by
 // secret and binds the resulting pairing to that user.
-func (m *PairingManager) SubmitPin(secret, pin, userID string) error {
+// via records how the PIN arrived ("" from the Pair page,
+// store.PairingViaBrowser from the embedded moonlight-web).
+func (m *PairingManager) SubmitPin(secret, pin, userID, via string) error {
 	m.mu.Lock()
 	p, ok := m.pending[secret]
 	m.mu.Unlock()
@@ -89,7 +93,7 @@ func (m *PairingManager) SubmitPin(secret, pin, userID string) error {
 		return ErrNoPending
 	}
 	select {
-	case p.ch <- pinSubmission{pin: pin, userID: userID}:
+	case p.ch <- pinSubmission{pin: pin, userID: userID, via: via}:
 		return nil
 	default:
 		return errors.New("a PIN was already submitted for this pairing")
@@ -171,6 +175,7 @@ func (m *PairingManager) phase1(ctx context.Context, key, clientIP, salt, client
 		clientCert: clientCert,
 		phase:      "GETSERVERCERT",
 		userID:     sub.userID,
+		via:        sub.via,
 		aesKey:     hash(saltData[:16], []byte(sub.pin))[:16],
 	})
 	return PairingResponse{
@@ -285,6 +290,7 @@ func (m *PairingManager) phase4(ctx context.Context, key, pairingSecret string) 
 		UserID:  st.userID,
 		CertPEM: string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: st.clientCert.Raw})),
 		Name:    st.clientCert.Subject.CommonName,
+		Via:     st.via,
 	}
 	if err := m.pairings.Upsert(ctx, p); err != nil {
 		return failPair(m.log, "save pairing: "+err.Error())

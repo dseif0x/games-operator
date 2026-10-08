@@ -56,22 +56,31 @@ func (s *Server) Handler() http.Handler {
 	base := s.Cfg.BasePath
 	root := http.NewServeMux()
 	s.probes(root)
+	if s.Browser != nil && s.Cfg.BrowserPath != "" {
+		// The embedded moonlight-web, below its own prefix (default /play).
+		// It carries its own security headers; the hub's would break it.
+		bp := s.Cfg.BrowserPath
+		root.Handle(bp+"/", s.recover(s.Browser))
+		root.HandleFunc(bp, func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, bp+"/", http.StatusTemporaryRedirect)
+		})
+	}
 	if base == "" {
 		root.Handle("/", hub)
 	} else {
 		root.Handle(base+"/", http.StripPrefix(base, hub))
-		root.HandleFunc(base, func(w http.ResponseWriter, r *http.Request) {
+		root.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 			http.Redirect(w, r, base+"/", http.StatusTemporaryRedirect)
 		})
-		if s.Browser != nil {
-			root.Handle("/", s.recover(s.Browser))
-		} else {
-			root.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-				http.Redirect(w, r, base+"/", http.StatusTemporaryRedirect)
-			})
-		}
 	}
 	return s.recover(s.hostAllowlist(s.logging(root)))
+}
+
+// Authenticated reports whether the request carries a valid hub session;
+// the browser proxy uses it to decide whom to trust.
+func (s *Server) Authenticated(r *http.Request) bool {
+	_, err := s.Cookies.Read(r)
+	return err == nil
 }
 
 func (s *Server) probes(mux *http.ServeMux) {
@@ -107,6 +116,7 @@ func (s *Server) hubMux() *http.ServeMux {
 	authed.HandleFunc("PATCH /api/v1/apps/{id}", s.updateApp)
 	authed.HandleFunc("DELETE /api/v1/apps/{id}", s.deleteApp)
 	authed.HandleFunc("POST /api/v1/apps/{id}/start", s.startApp)
+	authed.HandleFunc("POST /api/v1/apps/{id}/play", s.playApp)
 	authed.HandleFunc("POST /api/v1/apps/{id}/stop", s.stopApp)
 	authed.HandleFunc("GET /api/v1/apps/{id}/events", s.appEventLog)
 	authed.HandleFunc("GET /api/v1/apps/{id}/logs", s.appLogs)
@@ -254,12 +264,19 @@ func (s *Server) requireToken(next http.Handler) http.Handler {
 			writeWolfErr(w, http.StatusUnauthorized, "bearer token required")
 			return
 		}
-		u, err := s.Store.Users().GetByAPITokenHash(r.Context(), auth.HashToken(tok))
+		hash := auth.HashToken(tok)
+		browser := false
+		u, err := s.Store.Users().GetByAPITokenHash(r.Context(), hash)
+		if errors.Is(err, store.ErrNotFound) {
+			// The hub-managed token the embedded moonlight-web holds.
+			u, err = s.Store.Users().GetByBrowserTokenHash(r.Context(), hash)
+			browser = true
+		}
 		if err != nil || u.Disabled {
 			writeWolfErr(w, http.StatusUnauthorized, "invalid token")
 			return
 		}
-		p := &auth.Principal{User: u}
+		p := &auth.Principal{User: u, Browser: browser}
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), principalKey, p)))
 	})
 }
@@ -444,6 +461,56 @@ func (s *Server) startApp(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, s.Apps.View(a))
 }
 
+// playJSON is what the embedded moonlight-web needs to stream an app.
+type playJSON struct {
+	App               apps.View `json:"app"`
+	MoonlightHost     string    `json:"moonlight_host"`
+	MoonlightHostname string    `json:"moonlight_hostname"`
+	Backend           struct {
+		Type     string `json:"type"`
+		APIURL   string `json:"api_url"`
+		APIToken string `json:"api_token"`
+	} `json:"backend"`
+}
+
+// playApp prepares "Play in browser": it starts the app if needed, mints
+// the user's browser token (what moonlight-web pairs with) and makes the
+// embedded moonlight-web's existing pairing follow this user.
+func (s *Server) playApp(w http.ResponseWriter, r *http.Request) {
+	p := principal(r)
+	ctx := r.Context()
+	host := s.Apps.Defaults.MoonlightHost
+	if host == "" {
+		writeErr(w, http.StatusConflict, "the Moonlight LoadBalancer IP is not configured (moonlight.loadBalancerIP)")
+		return
+	}
+	a, err := s.Apps.Start(ctx, p.User, r.PathValue("id"))
+	if err != nil {
+		s.mapErr(w, err)
+		return
+	}
+	tok, err := auth.NewToken()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := s.Store.Users().SetBrowserTokenHash(ctx, p.User.ID, auth.HashToken(tok)); err != nil {
+		s.mapErr(w, err)
+		return
+	}
+	if n, err := s.Store.Pairings().Reassign(ctx, store.PairingViaBrowser, p.User.ID); err != nil {
+		s.mapErr(w, err)
+		return
+	} else if n > 0 {
+		s.Log.Info("browser pairing now follows user", "user", p.User.Username, "pairings", n)
+	}
+	out := playJSON{App: s.Apps.View(a), MoonlightHost: host, MoonlightHostname: s.Cfg.MoonlightHostname}
+	out.Backend.Type = "wolf"
+	out.Backend.APIURL = s.Cfg.PublicURL.String() + "/wolf"
+	out.Backend.APIToken = tok
+	writeJSON(w, http.StatusOK, out)
+}
+
 func (s *Server) stopApp(w http.ResponseWriter, r *http.Request) {
 	p := principal(r)
 	a, err := s.Apps.Stop(r.Context(), p.User, r.PathValue("id"))
@@ -572,7 +639,7 @@ func (s *Server) submitPin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "the PIN is four digits")
 		return
 	}
-	if err := s.Pairing.SubmitPin(body.Secret, body.Pin, p.User.ID); err != nil {
+	if err := s.Pairing.SubmitPin(body.Secret, body.Pin, p.User.ID, ""); err != nil {
 		if errors.Is(err, moonlight.ErrNoPending) {
 			writeErr(w, http.StatusNotFound, err.Error())
 			return
@@ -642,7 +709,11 @@ func (s *Server) wolfPairClient(w http.ResponseWriter, r *http.Request) {
 		writeWolfErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := s.Pairing.SubmitPin(body.PairSecret, strings.TrimSpace(body.Pin), p.User.ID); err != nil {
+	via := ""
+	if p.Browser {
+		via = store.PairingViaBrowser
+	}
+	if err := s.Pairing.SubmitPin(body.PairSecret, strings.TrimSpace(body.Pin), p.User.ID, via); err != nil {
 		writeWolfErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}

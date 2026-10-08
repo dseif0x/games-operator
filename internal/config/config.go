@@ -155,13 +155,21 @@ type Config struct {
 	// the root). The UI and API live under it, so the root of the host can
 	// belong to moonlight-web.
 	BasePath string
-	// BrowserUpstream is the in-cluster URL of moonlight-web. When set the
-	// hub reverse-proxies everything outside BasePath to it, so the browser
-	// client shares the hub's host name (and its Ingress, TLS and tunnel).
+	// BrowserUpstream is the in-cluster URL of the embedded moonlight-web
+	// (the games-operator fork). When set the hub reverse-proxies BrowserPath
+	// to it, so the browser client shares the hub's host name, Ingress, TLS
+	// and tunnel, and the hub's login decides who may use it.
 	BrowserUpstream *url.URL
+	// BrowserPath is the prefix the embedded moonlight-web is served under
+	// ("/play"); no trailing slash.
+	BrowserPath string
+	// BrowserSecret is what the proxy puts in X-MW-Embedded so moonlight-web
+	// trusts the forwarded requests (its MW_EMBEDDED_SECRET).
+	BrowserSecret string
 	// BrowserURL is the public URL of the moonlight-web instance that
 	// streams into the browser; empty hides "Play in browser". Derived from
-	// PublicURL when BrowserUpstream is set, otherwise BROWSER_URL.
+	// PublicURL and BrowserPath when BrowserUpstream is set, otherwise
+	// BROWSER_URL (a moonlight-web run elsewhere).
 	BrowserURL string
 
 	CookieSecret      []byte
@@ -310,17 +318,21 @@ func load(get lookup) (*Config, error) {
 			}
 		}
 	}
+	c.BrowserPath = strings.TrimSuffix(path.Clean("/"+str("BROWSER_PATH", "/play")), "/")
+	c.BrowserSecret = str("BROWSER_SECRET", "")
 	if raw := str("BROWSER_UPSTREAM", ""); raw != "" {
 		u, err := url.Parse(raw)
 		switch {
 		case err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https"):
 			errs = append(errs, fmt.Errorf("%sBROWSER_UPSTREAM must be an absolute http(s) URL", Prefix))
-		case c.PublicURL != nil && c.BasePath == "":
-			errs = append(errs, fmt.Errorf("%sPUBLIC_URL needs a path such as /hub when BROWSER_UPSTREAM is set: moonlight-web is served at the root", Prefix))
+		case c.BrowserPath == "" || c.BrowserPath == c.BasePath:
+			errs = append(errs, fmt.Errorf("%sBROWSER_PATH must be a path of its own (not the root, not PUBLIC_URL's path)", Prefix))
+		case c.BrowserSecret == "":
+			errs = append(errs, fmt.Errorf("%sBROWSER_SECRET is required with BROWSER_UPSTREAM (moonlight-web's MW_EMBEDDED_SECRET)", Prefix))
 		default:
 			c.BrowserUpstream = u
 			if c.PublicURL != nil {
-				c.BrowserURL = c.PublicURL.Scheme + "://" + c.PublicURL.Host + "/"
+				c.BrowserURL = c.PublicURL.Scheme + "://" + c.PublicURL.Host + c.BrowserPath + "/"
 			}
 		}
 	}

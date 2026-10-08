@@ -74,19 +74,27 @@ func TestBasePathAndBrowserUpstream(t *testing.T) {
 		}
 		return m
 	}
-	c, err := load(env(with("GAMES_OPERATOR_PUBLIC_URL", "https://games.example.com/hub/", "GAMES_OPERATOR_BROWSER_UPSTREAM", "https://mw:8443")))
+	c, err := load(env(with("GAMES_OPERATOR_PUBLIC_URL", "https://games.example.com/hub/", "GAMES_OPERATOR_BROWSER_UPSTREAM", "https://mw:8443", "GAMES_OPERATOR_BROWSER_SECRET", "s3cret")))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.BasePath != "/hub" || c.BrowserURL != "https://games.example.com/" || c.BrowserUpstream.Host != "mw:8443" {
-		t.Fatalf("base %q browser %q upstream %v", c.BasePath, c.BrowserURL, c.BrowserUpstream)
+	if c.BasePath != "/hub" || c.BrowserPath != "/play" || c.BrowserURL != "https://games.example.com/play/" || c.BrowserUpstream.Host != "mw:8443" {
+		t.Fatalf("base %q browser path %q url %q upstream %v", c.BasePath, c.BrowserPath, c.BrowserURL, c.BrowserUpstream)
+	}
+	c, err = load(env(with("GAMES_OPERATOR_PUBLIC_URL", "https://games.example.com", "GAMES_OPERATOR_BROWSER_UPSTREAM", "https://mw:8443", "GAMES_OPERATOR_BROWSER_SECRET", "s3cret", "GAMES_OPERATOR_BROWSER_PATH", "/stream/")))
+	if err != nil || c.BrowserPath != "/stream" || c.BrowserURL != "https://games.example.com/stream/" {
+		t.Fatalf("custom path: %v %q %q", err, c.BrowserPath, c.BrowserURL)
 	}
 	c, err = load(env(with("GAMES_OPERATOR_PUBLIC_URL", "https://games.example.com", "GAMES_OPERATOR_BROWSER_URL", "https://play.example.com")))
 	if err != nil || c.BasePath != "" || c.BrowserURL != "https://play.example.com" {
 		t.Fatalf("root: %v base %q browser %q", err, c.BasePath, c.BrowserURL)
 	}
 	_, err = load(env(with("GAMES_OPERATOR_PUBLIC_URL", "https://games.example.com", "GAMES_OPERATOR_BROWSER_UPSTREAM", "https://mw:8443")))
-	if err == nil || !strings.Contains(err.Error(), "PUBLIC_URL needs a path") {
-		t.Fatalf("upstream at the root must be rejected: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "BROWSER_SECRET is required") {
+		t.Fatalf("upstream without a secret must be rejected: %v", err)
+	}
+	_, err = load(env(with("GAMES_OPERATOR_PUBLIC_URL", "https://games.example.com", "GAMES_OPERATOR_BROWSER_UPSTREAM", "https://mw:8443", "GAMES_OPERATOR_BROWSER_SECRET", "x", "GAMES_OPERATOR_BROWSER_PATH", "/")))
+	if err == nil || !strings.Contains(err.Error(), "BROWSER_PATH") {
+		t.Fatalf("player at the root must be rejected: %v", err)
 	}
 }

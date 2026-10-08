@@ -22,6 +22,9 @@ type Principal struct {
 	User *store.User
 	// Nonce is unique per login and is what the CSRF token is derived from.
 	Nonce string
+	// Browser is set when the principal authenticated with the user's
+	// browser token (the embedded moonlight-web), not a cookie or API token.
+	Browser bool
 }
 
 // Authenticator turns credentials into a user. PasswordAuthenticator is the

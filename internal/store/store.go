@@ -41,7 +41,13 @@ type User struct {
 	// APIToken authenticates Wolf-compatible API calls (moonlight-web's
 	// auto-pairing) as this user. Stored hashed.
 	APITokenHash string
+	// BrowserTokenHash is the hub-managed counterpart the hub hands the
+	// embedded moonlight-web on every "Play in browser"; see PairingViaBrowser.
+	BrowserTokenHash string
 }
+
+// PairingViaBrowser marks a pairing made by the embedded moonlight-web.
+const PairingViaBrowser = "browser"
 
 // App is one row of the apps table: a game or desktop app a user can
 // launch from Moonlight. The pod exists only while the app is running.
@@ -95,10 +101,13 @@ type Stream struct {
 
 // Pairing is a Moonlight client certificate bound to a user.
 type Pairing struct {
-	ID         string // sha256 fingerprint of the certificate, hex
-	UserID     string
-	CertPEM    string
-	Name       string
+	ID      string // sha256 fingerprint of the certificate, hex
+	UserID  string
+	CertPEM string
+	Name    string
+	// Via is how the pairing was made: "" (PIN on the Pair page) or
+	// PairingViaBrowser.
+	Via        string
 	CreatedAt  time.Time
 	LastSeenAt *time.Time
 }
@@ -121,6 +130,8 @@ type Users interface {
 	// UpsertPassword creates the user or replaces its password hash.
 	UpsertPassword(ctx context.Context, username, passwordHash string) (*User, error)
 	SetAPITokenHash(ctx context.Context, id, hash string) error
+	GetByBrowserTokenHash(ctx context.Context, hash string) (*User, error)
+	SetBrowserTokenHash(ctx context.Context, id, hash string) error
 }
 
 // Apps is the app aggregate.
@@ -158,6 +169,10 @@ type Pairings interface {
 	List(ctx context.Context, userID string) ([]*Pairing, error)
 	Delete(ctx context.Context, userID, id string) error
 	TouchSeen(ctx context.Context, id string, at time.Time) error
+	// Reassign moves every pairing made via the given way to the user and
+	// returns how many moved. The embedded moonlight-web is one Moonlight
+	// client shared by every browser, so its pairing follows the player.
+	Reassign(ctx context.Context, via, userID string) (int, error)
 }
 
 // Events is the app_events aggregate.

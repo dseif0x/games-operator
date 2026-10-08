@@ -47,7 +47,7 @@ func TestPairingRoundTrip(t *testing.T) {
 	go func() {
 		for i := 0; i < 100; i++ {
 			if p := m.Pending(); len(p) == 1 {
-				if err := m.SubmitPin(p[0].Secret, pin, "user-1"); err != nil {
+				if err := m.SubmitPin(p[0].Secret, pin, "user-1", ""); err != nil {
 					t.Error(err)
 				}
 				return
@@ -131,7 +131,7 @@ func TestPairingWrongPin(t *testing.T) {
 	go func() {
 		time.Sleep(20 * time.Millisecond)
 		for _, p := range m.Pending() {
-			_ = m.SubmitPin(p.Secret, "0000", "u")
+			_ = m.SubmitPin(p.Secret, "0000", "u", "")
 		}
 	}()
 	if r := m.phase1(context.Background(), key, "ip", hex.EncodeToString(salt), hex.EncodeToString(clientPEM)); r.Paired != 1 {

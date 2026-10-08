@@ -125,11 +125,11 @@ func mapErr(err error) error {
 
 type pgUsers struct{ pool *pgxpool.Pool }
 
-const userCols = "id, username, password_hash, created_at, disabled, api_token_hash"
+const userCols = "id, username, password_hash, created_at, disabled, api_token_hash, browser_token_hash"
 
 func scanUser(row pgx.Row) (*User, error) {
 	var u User
-	if err := row.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.CreatedAt, &u.Disabled, &u.APITokenHash); err != nil {
+	if err := row.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.CreatedAt, &u.Disabled, &u.APITokenHash, &u.BrowserTokenHash); err != nil {
 		return nil, mapErr(err)
 	}
 	return &u, nil
@@ -142,8 +142,8 @@ func (r pgUsers) Create(ctx context.Context, u *User) error {
 	if u.CreatedAt.IsZero() {
 		u.CreatedAt = time.Now()
 	}
-	_, err := r.pool.Exec(ctx, `INSERT INTO users (`+userCols+`) VALUES ($1,$2,$3,$4,$5,$6)`,
-		u.ID, u.Username, u.PasswordHash, u.CreatedAt, u.Disabled, u.APITokenHash)
+	_, err := r.pool.Exec(ctx, `INSERT INTO users (`+userCols+`) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+		u.ID, u.Username, u.PasswordHash, u.CreatedAt, u.Disabled, u.APITokenHash, u.BrowserTokenHash)
 	return mapErr(err)
 }
 
@@ -167,6 +167,18 @@ func (r pgUsers) UpsertPassword(ctx context.Context, username, hash string) (*Us
 		INSERT INTO users (id, username, password_hash) VALUES ($1,$2,$3)
 		ON CONFLICT (username) DO UPDATE SET password_hash = EXCLUDED.password_hash
 		RETURNING `+userCols, NewID(), username, hash))
+}
+
+func (r pgUsers) GetByBrowserTokenHash(ctx context.Context, hash string) (*User, error) {
+	if hash == "" {
+		return nil, ErrNotFound
+	}
+	return scanUser(r.pool.QueryRow(ctx, `SELECT `+userCols+` FROM users WHERE browser_token_hash=$1`, hash))
+}
+
+func (r pgUsers) SetBrowserTokenHash(ctx context.Context, id, hash string) error {
+	_, err := r.pool.Exec(ctx, `UPDATE users SET browser_token_hash=$2 WHERE id=$1`, id, hash)
+	return mapErr(err)
 }
 
 func (r pgUsers) SetAPITokenHash(ctx context.Context, id, hash string) error {
@@ -346,11 +358,11 @@ func (r pgApps) CountByState(ctx context.Context) (map[string]int, error) {
 
 type pgPairings struct{ pool *pgxpool.Pool }
 
-const pairingCols = "id, user_id, cert_pem, name, created_at, last_seen_at"
+const pairingCols = "id, user_id, cert_pem, name, via, created_at, last_seen_at"
 
 func scanPairing(row pgx.Row) (*Pairing, error) {
 	var p Pairing
-	if err := row.Scan(&p.ID, &p.UserID, &p.CertPEM, &p.Name, &p.CreatedAt, &p.LastSeenAt); err != nil {
+	if err := row.Scan(&p.ID, &p.UserID, &p.CertPEM, &p.Name, &p.Via, &p.CreatedAt, &p.LastSeenAt); err != nil {
 		return nil, mapErr(err)
 	}
 	return &p, nil
@@ -360,9 +372,9 @@ func (r pgPairings) Upsert(ctx context.Context, p *Pairing) error {
 	if p.CreatedAt.IsZero() {
 		p.CreatedAt = time.Now()
 	}
-	_, err := r.pool.Exec(ctx, `INSERT INTO pairings (`+pairingCols+`) VALUES ($1,$2,$3,$4,$5,$6)
-		ON CONFLICT (id) DO UPDATE SET user_id=EXCLUDED.user_id, cert_pem=EXCLUDED.cert_pem, name=EXCLUDED.name`,
-		p.ID, p.UserID, p.CertPEM, p.Name, p.CreatedAt, p.LastSeenAt)
+	_, err := r.pool.Exec(ctx, `INSERT INTO pairings (`+pairingCols+`) VALUES ($1,$2,$3,$4,$5,$6,$7)
+		ON CONFLICT (id) DO UPDATE SET user_id=EXCLUDED.user_id, cert_pem=EXCLUDED.cert_pem, name=EXCLUDED.name, via=EXCLUDED.via`,
+		p.ID, p.UserID, p.CertPEM, p.Name, p.Via, p.CreatedAt, p.LastSeenAt)
 	return mapErr(err)
 }
 
@@ -396,6 +408,14 @@ func (r pgPairings) Delete(ctx context.Context, userID, id string) error {
 		return ErrNotFound
 	}
 	return nil
+}
+
+func (r pgPairings) Reassign(ctx context.Context, via, userID string) (int, error) {
+	tag, err := r.pool.Exec(ctx, `UPDATE pairings SET user_id=$2 WHERE via=$1 AND user_id<>$2`, via, userID)
+	if err != nil {
+		return 0, mapErr(err)
+	}
+	return int(tag.RowsAffected()), nil
 }
 
 func (r pgPairings) TouchSeen(ctx context.Context, id string, at time.Time) error {

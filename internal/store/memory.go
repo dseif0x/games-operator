@@ -123,6 +123,32 @@ func (r memUsers) UpsertPassword(ctx context.Context, username, hash string) (*U
 	return u, nil
 }
 
+func (r memUsers) GetByBrowserTokenHash(_ context.Context, hash string) (*User, error) {
+	r.m.mu.Lock()
+	defer r.m.mu.Unlock()
+	if hash == "" {
+		return nil, ErrNotFound
+	}
+	for _, u := range r.m.users {
+		if u.BrowserTokenHash == hash {
+			c := *u
+			return &c, nil
+		}
+	}
+	return nil, ErrNotFound
+}
+
+func (r memUsers) SetBrowserTokenHash(_ context.Context, id, hash string) error {
+	r.m.mu.Lock()
+	defer r.m.mu.Unlock()
+	u, ok := r.m.users[id]
+	if !ok {
+		return ErrNotFound
+	}
+	u.BrowserTokenHash = hash
+	return nil
+}
+
 func (r memUsers) SetAPITokenHash(_ context.Context, id, hash string) error {
 	r.m.mu.Lock()
 	defer r.m.mu.Unlock()
@@ -384,6 +410,19 @@ func (r memPairings) Delete(_ context.Context, userID, id string) error {
 	}
 	delete(r.m.pairings, id)
 	return nil
+}
+
+func (r memPairings) Reassign(_ context.Context, via, userID string) (int, error) {
+	r.m.mu.Lock()
+	defer r.m.mu.Unlock()
+	n := 0
+	for _, p := range r.m.pairings {
+		if p.Via == via && p.UserID != userID {
+			p.UserID = userID
+			n++
+		}
+	}
+	return n, nil
 }
 
 func (r memPairings) TouchSeen(_ context.Context, id string, at time.Time) error {

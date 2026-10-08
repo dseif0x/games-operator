@@ -22,8 +22,8 @@ spec:
     apps:
       storageClass: local-path          # the GPU node's own disk
       nodeSelector: { kubernetes.io/hostname: gpu-node }
-    publicUrl: https://games.homelab.example.com/hub   # the hub below /hub, moonlight-web at the root
-    browser: { enabled: true }
+    publicUrl: https://games.homelab.example.com
+    browser: { enabled: true }   # the player at /play
     postgresql: { enabled: false }
     database: { existingSecret: games-operator-db-app, existingSecretKey: uri }   # CloudNativePG
 ```
@@ -52,20 +52,15 @@ kubectl apply -f https://raw.githubusercontent.com/dseif0x/games-operator/main/h
 - Per-app ports: `streamPortBase + 10×slot` (RTSP, TCP) and `+1/+2/+3` (control, video, audio; UDP). With `maxConcurrent: 10` that is 48100–48199. Open them on the firewall if clients come from another network.
 - Moonlight clients see the app list only after pairing; `serverinfo` without a certificate reports the host as unpaired.
 
-## moonlight-web
+## In-browser play (moonlight-web)
 
-`browser.enabled: true` deploys `ghcr.io/linckosz/moonlight-web` and makes the hub reverse-proxy it: the root of `publicUrl`'s host is moonlight-web, the hub's UI and API live under the path in `publicUrl` (say `/hub`). One host name, one Ingress, one certificate, and it works through a Cloudflare tunnel or across a firewall, because the stream falls back to moonlight-web's WebSocket transport when WebRTC's UDP cannot reach the browser. `browser.hostNetwork: true` additionally exposes the UDP media ports on the node for browsers on the same LAN.
+`browser.enabled: true` deploys the games-operator fork of [moonlight-web](https://github.com/dseif0x/moonlight-web) (branch `games-operator`, image `ghcr.io/dseif0x/moonlight-web:go-<version>`) in its *embedded mode*: the hub serves it below `browser.path` (`/play`) on its own host, requires the hub login for it, and marks every forwarded request with a secret moonlight-web trusts (`MW_EMBEDDED_SECRET`, key `browserSecret` of the auth Secret). There is no PIN, no host list and no admin page.
 
-First run, once:
+**Play in browser** on an app opens `/play/#app=<id>`. The player asks the hub to prepare the app (`POST /api/v1/apps/{id}/play`: starts the pod, mints the user's browser token, makes the shared moonlight-web pairing follow the user), adds and pairs the Moonlight host on its own, waits for the pod while showing the hub's progress, then launches. One host name, one Ingress, one certificate; the stream falls back to moonlight-web's WebSocket transport through the hub where WebRTC's UDP cannot reach the browser (a Cloudflare tunnel, a firewall between subnets). `browser.hostNetwork: true` additionally exposes the UDP media ports on the node for browsers on the same LAN.
 
-```sh
-kubectl -n games exec deploy/games-operator-moonlight-web -- moonlightweb --new-pin        # a PIN per device to log in
-kubectl -n games exec -i deploy/games-operator-moonlight-web -- moonlightweb --set-admin-password   # reads the password twice from stdin
-```
+moonlight-web is one Moonlight client for every browser. Its pairing is bound to whoever pressed Play last, so two different hub users cannot play through it at the same time; the same user on several devices can.
 
-Open the host's root, enter the PIN, add the Moonlight LoadBalancer IP as a host, then host card → ⋯ → **Backend**: type *Wolf*, API URL and token from the hub's Account page. From then on moonlight-web pairs and streams your apps in the browser. Apps start when moonlight-web (or any Moonlight client) launches them; the hub's "Browser" button only opens moonlight-web.
-
-moonlight-web sees every browser behind the hub's address, so its per-peer flood protection counts all users together.
+`browser.externalUrl` (with `enabled: false`) only adds a link to a stock moonlight-web you run elsewhere; pair it by hand through the Pair page or the Account page's API token.
 
 ## GPU node that sleeps, and client timeouts
 

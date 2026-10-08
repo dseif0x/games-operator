@@ -1,7 +1,8 @@
 {{- if .Values.browser.enabled }}
-# moonlight-web: a Moonlight client that re-packetises the stream onto
-# WebRTC for the browser. It pairs with the hub like any other client; the
-# user's API token (account page) lets it enter the PIN on its own.
+# The embedded moonlight-web (games-operator fork): a Moonlight client that
+# re-packetises the stream for the browser. The hub proxies it below
+# browser.path, logs the browser in and marks forwarded requests with the
+# shared secret; "Play in browser" pairs and launches without any UI here.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -41,6 +42,11 @@ spec:
               value: {{ .Values.browser.httpPort | quote }}
             - name: MW_UPNP
               value: "0"
+            - name: MW_EMBEDDED_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "games-operator.authSecretName" . }}
+                  key: browserSecret
             - name: TZ
               value: {{ .Values.apps.timeZone | quote }}
           ports:

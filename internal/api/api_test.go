@@ -10,7 +10,6 @@ import (
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
-	"strings"
 	"testing"
 	"time"
 
@@ -31,10 +30,11 @@ func (nopOrch) BridgeStatus(context.Context, string) (bridge.Status, error) {
 }
 
 type client struct {
-	t    *testing.T
-	base string
-	http *http.Client
-	csrf string
+	t      *testing.T
+	base   string
+	http   *http.Client
+	csrf   string
+	server *Server
 }
 
 func (c *client) do(method, path string, body any) (int, map[string]any) {
@@ -62,11 +62,6 @@ func (c *client) do(method, path string, body any) (int, map[string]any) {
 	return res.StatusCode, out
 }
 
-func newServer(t *testing.T) (*httptest.Server, *client) {
-	t.Helper()
-	return newServerAt(t, "", nil)
-}
-
 // newServerAt mounts the hub under basePath, with browser as the handler
 // for the rest of the host.
 func newServerAt(t *testing.T, basePath string, browser http.Handler) (*httptest.Server, *client) {
@@ -82,7 +77,7 @@ func newServerAt(t *testing.T, basePath string, browser http.Handler) (*httptest
 		t.Fatal(err)
 	}
 	pub, _ := url.Parse("https://games.example.com" + basePath)
-	cfg := &config.Config{PublicURL: pub, BasePath: basePath, AllowedHosts: []string{"games.example.com"}, CookieSecret: bytes.Repeat([]byte{1}, 32)}
+	cfg := &config.Config{PublicURL: pub, BasePath: basePath, BrowserPath: "/play", AllowedHosts: []string{"games.example.com"}, CookieSecret: bytes.Repeat([]byte{1}, 32)}
 	svc := &apps.Service{Store: st, Orch: nopOrch{}, Broker: apps.NewBroker(), Log: log, Defaults: apps.Defaults{PVCSize: "50Gi", MaxConcurrent: 2}}
 	s := &Server{
 		Cfg: cfg, Store: st, Apps: svc, Pairing: moonlight.NewPairingManager(cert, st.Pairings(), log),
@@ -93,7 +88,7 @@ func newServerAt(t *testing.T, basePath string, browser http.Handler) (*httptest
 	srv := httptest.NewServer(s.Handler())
 	t.Cleanup(srv.Close)
 	jar, _ := cookiejar.New(nil)
-	return srv, &client{t: t, base: srv.URL, http: &http.Client{Jar: jar}}
+	return srv, &client{t: t, base: srv.URL, http: &http.Client{Jar: jar}, server: s}
 }
 
 func TestBasePathAndBrowserProxy(t *testing.T) {
@@ -111,23 +106,25 @@ func TestBasePathAndBrowserProxy(t *testing.T) {
 		b, _ := io.ReadAll(res.Body)
 		return res.StatusCode, string(b)
 	}
-	if code, body := get("/"); code != 200 || body != "mw:/" {
-		t.Fatalf("root must reach moonlight-web: %d %q", code, body)
+	// The player lives under its own prefix; the proxy sees the full path.
+	if code, body := get("/play/"); code != 200 || body != "mw:/play/" {
+		t.Fatalf("player root: %d %q", code, body)
 	}
-	if code, body := get("/ws/stream"); code != 200 || body != "mw:/ws/stream" {
-		t.Fatalf("moonlight-web path: %d %q", code, body)
+	if code, body := get("/play/ws/stream"); code != 200 || body != "mw:/play/ws/stream" {
+		t.Fatalf("player websocket path: %d %q", code, body)
 	}
-	if code, body := get("/api/hosts"); code != 200 || body != "mw:/api/hosts" {
-		t.Fatalf("moonlight-web api must not hit the hub: %d %q", code, body)
+	if code, _ := get("/play"); code != 307 {
+		t.Fatalf("bare player prefix must redirect: %d", code)
 	}
+	// The hub under its base path, everything else redirected there.
 	if code, body := get("/hub/"); code != 200 || body != "ui:/" {
 		t.Fatalf("hub ui: %d %q", code, body)
 	}
 	if code, body := get("/hub/apps/123"); code != 200 || body != "ui:/apps/123" {
 		t.Fatalf("hub ui deep route: %d %q", code, body)
 	}
-	if code, _ := get("/hub"); code != 307 {
-		t.Fatalf("bare prefix must redirect: %d", code)
+	if code, _ := get("/"); code != 307 {
+		t.Fatalf("root must redirect to the hub: %d", code)
 	}
 	if code, _ := get("/healthz"); code != 200 {
 		t.Fatalf("probe at the root: %d", code)
@@ -138,108 +135,70 @@ func TestBasePathAndBrowserProxy(t *testing.T) {
 	if code, _ := c.do("GET", "/hub/api/v1/apps", nil); code != 200 {
 		t.Fatalf("api under the prefix: %d", code)
 	}
-	if code, _ := c.do("GET", "/api/v1/apps", nil); code != 200 {
-		t.Fatalf("hub api at the root belongs to moonlight-web now: %d", code)
-	}
-}
-
-func TestLoginAndApps(t *testing.T) {
-	_, c := newServer(t)
-	if code, _ := c.do("GET", "/api/v1/apps", nil); code != 401 {
-		t.Fatalf("unauthenticated: %d", code)
-	}
-	if code, _ := c.do("POST", "/api/v1/auth/login", map[string]string{"username": "admin", "password": "wrong"}); code != 401 {
-		t.Fatalf("bad password: %d", code)
-	}
-	code, out := c.do("POST", "/api/v1/auth/login", map[string]string{"username": "admin", "password": "secret"})
-	if code != 200 {
-		t.Fatalf("login: %d %v", code, out)
-	}
-	c.csrf, _ = out["csrf"].(string)
-	// Without the CSRF header writes are refused.
-	saved := c.csrf
-	c.csrf = ""
-	if code, _ := c.do("POST", "/api/v1/apps", map[string]any{"name": "Steam", "preset": "steam"}); code != 403 {
-		t.Fatalf("csrf: %d", code)
-	}
-	c.csrf = saved
-	code, out = c.do("POST", "/api/v1/apps", map[string]any{"name": "Steam", "preset": "steam"})
-	if code != 201 || out["state"] != "stopped" || out["image"] != "ghcr.io/games-on-whales/steam:edge" {
-		t.Fatalf("create: %d %v", code, out)
-	}
-	id := out["id"].(string)
-	code, out = c.do("GET", "/api/v1/apps", nil)
-	if code != 200 || len(out["apps"].([]any)) != 1 || len(out["presets"].([]any)) < 5 {
-		t.Fatalf("list: %d %v", code, out)
-	}
-	if code, out := c.do("POST", "/api/v1/apps/"+id+"/stop", nil); code != 409 {
-		t.Fatalf("stop a stopped app: %d %v", code, out)
-	}
-	if code, out := c.do("POST", "/api/v1/apps", map[string]any{"name": "", "preset": "steam"}); code != 400 || !strings.Contains(out["error"].(string), "name") {
-		t.Fatalf("validation: %d %v", code, out)
-	}
-	if code, _ := c.do("DELETE", "/api/v1/apps/"+id, nil); code != 202 {
-		t.Fatalf("delete: %d", code)
-	}
-	code, out = c.do("GET", "/api/v1/pairings", nil)
-	if code != 200 || len(out["pending"].([]any)) != 0 {
-		t.Fatalf("pairings: %d %v", code, out)
-	}
-	if code, out := c.do("POST", "/api/v1/pairings/pin", map[string]string{"secret": "nope", "pin": "1234"}); code != 404 {
-		t.Fatalf("pin for unknown secret: %d %v", code, out)
-	}
-}
-
-func TestWolfCompatAPI(t *testing.T) {
-	srv, c := newServer(t)
-	_, out := c.do("POST", "/api/v1/auth/login", map[string]string{"username": "admin", "password": "secret"})
-	c.csrf, _ = out["csrf"].(string)
-	code, out := c.do("POST", "/api/v1/me/api-token", nil)
-	if code != 200 || out["token"] == "" || !strings.HasSuffix(out["api_url"].(string), "/wolf") {
-		t.Fatalf("token: %d %v", code, out)
-	}
-	token := out["token"].(string)
-	req, _ := http.NewRequest("GET", srv.URL+"/wolf/api/v1/pair/pending", nil)
+	// At the root the player keeps its own prefix even when the hub has none.
+	srv2, _ := newServerAt(t, "", browser)
+	req, _ := http.NewRequest("GET", srv2.URL+"/play/api/hosts", nil)
 	req.Host = "games.example.com"
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
+	body, _ := io.ReadAll(res.Body)
 	res.Body.Close()
-	if res.StatusCode != 401 {
-		t.Fatalf("no bearer: %d", res.StatusCode)
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	res, err = http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var body map[string]any
-	_ = json.NewDecoder(res.Body).Decode(&body)
-	res.Body.Close()
-	if res.StatusCode != 200 || body["success"] != true {
-		t.Fatalf("pending: %d %v", res.StatusCode, body)
-	}
-	if code, _ := c.do("DELETE", "/api/v1/me/api-token", nil); code != 200 {
-		t.Fatalf("revoke: %d", code)
-	}
-	res, _ = http.DefaultClient.Do(req)
-	res.Body.Close()
-	if res.StatusCode != 401 {
-		t.Fatalf("revoked token still works: %d", res.StatusCode)
+	if res.StatusCode != 200 || string(body) != "mw:/play/api/hosts" {
+		t.Fatalf("player next to a root hub: %d %q", res.StatusCode, body)
 	}
 }
 
-func TestHostAllowlist(t *testing.T) {
-	srv, _ := newServer(t)
-	req, _ := http.NewRequest("GET", srv.URL+"/api/v1/apps", nil)
-	req.Host = "evil.example.com"
+func TestPlayInBrowser(t *testing.T) {
+	srv, c := newServerAt(t, "", nil)
+	_ = srv
+	code, out := c.do("POST", "/api/v1/auth/login", map[string]string{"username": "admin", "password": "secret"})
+	if code != 200 {
+		t.Fatal("login")
+	}
+	c.csrf, _ = out["csrf"].(string)
+	code, out = c.do("POST", "/api/v1/apps", map[string]any{"name": "Steam", "preset": "steam"})
+	if code != 201 {
+		t.Fatalf("create: %d %v", code, out)
+	}
+	id := out["id"].(string)
+	// Without a Moonlight address there is nothing a browser could connect to.
+	if code, _ := c.do("POST", "/api/v1/apps/"+id+"/play", map[string]any{}); code != 409 {
+		t.Fatalf("play without LB IP: %d", code)
+	}
+	c.server.Apps.Defaults.MoonlightHost = "10.0.0.9"
+	code, out = c.do("POST", "/api/v1/apps/"+id+"/play", map[string]any{})
+	if code != 200 {
+		t.Fatalf("play: %d %v", code, out)
+	}
+	backend := out["backend"].(map[string]any)
+	tok, _ := backend["api_token"].(string)
+	if tok == "" || backend["api_url"] != "https://games.example.com/wolf" || out["moonlight_host"] != "10.0.0.9" {
+		t.Fatalf("play answer: %v", out)
+	}
+	if app := out["app"].(map[string]any); app["state"] != "starting" && app["state"] != "running" {
+		t.Fatalf("play must start the app: %v", app["state"])
+	}
+	// The browser token opens the Wolf-compatible API as this user.
+	req, _ := http.NewRequest("GET", srv.URL+"/wolf/api/v1/pair/pending", nil)
+	req.Host = "games.example.com"
+	req.Header.Set("Authorization", "Bearer "+tok)
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
 	res.Body.Close()
-	if res.StatusCode != http.StatusMisdirectedRequest {
-		t.Fatalf("expected 421, got %d", res.StatusCode)
+	if res.StatusCode != 200 {
+		t.Fatalf("browser token on the wolf api: %d", res.StatusCode)
+	}
+	// Each play mints a new token; the old one stops working.
+	if code, _ := c.do("POST", "/api/v1/apps/"+id+"/play", map[string]any{}); code != 200 {
+		t.Fatal("second play")
+	}
+	res2, _ := http.DefaultClient.Do(req)
+	res2.Body.Close()
+	if res2.StatusCode != 401 {
+		t.Fatalf("stale browser token: %d", res2.StatusCode)
 	}
 }

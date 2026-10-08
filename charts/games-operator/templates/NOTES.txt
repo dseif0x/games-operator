@@ -12,9 +12,7 @@ Password: generated. Read it with
 {{- end }}
 
 {{- if .Values.browser.enabled }}
-Browser: {{ regexReplaceAll "^(https?://[^/]+).*$" .Values.publicUrl "$1" }}/ (moonlight-web, proxied by the hub). First run, once:
-  kubectl -n {{ .Release.Namespace }} exec deploy/{{ include "games-operator.fullname" . }}-moonlight-web -- moonlightweb --new-pin
-  kubectl -n {{ .Release.Namespace }} exec -i deploy/{{ include "games-operator.fullname" . }}-moonlight-web -- moonlightweb --set-admin-password
+Browser: "Play in browser" on any app streams it at {{ regexReplaceAll "^(https?://[^/]+).*$" .Values.publicUrl "$1" }}{{ .Values.browser.path }}/ (nothing to set up).
 {{- end }}
 
 Moonlight host: the LoadBalancer IP of

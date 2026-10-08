@@ -35,6 +35,13 @@ export function App() {
         onLogin={(u, csrf) => {
           setCsrf(csrf);
           setUser(u);
+          // The player (/play/…) lives outside this app: a login that started
+          // there goes back there with a full navigation.
+          const next = new URLSearchParams(location.search).get("next") || "";
+          if (next.startsWith("/") && !next.startsWith("//")) {
+            location.href = next;
+            return;
+          }
           navigate("/", true);
         }}
       />

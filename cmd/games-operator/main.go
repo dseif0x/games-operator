@@ -162,8 +162,11 @@ func run() error {
 		Log:     log,
 	}
 	if cfg.BrowserUpstream != nil {
-		srv.Browser = browser.New(cfg.BrowserUpstream, log)
-		log.Info("proxying moonlight-web", "upstream", cfg.BrowserUpstream.String(), "base_path", cfg.BasePath)
+		srv.Browser = browser.New(browser.Options{
+			Upstream: cfg.BrowserUpstream, Prefix: cfg.BrowserPath, Secret: cfg.BrowserSecret,
+			Authenticated: srv.Authenticated, LoginPath: cfg.BasePath + "/login", Log: log,
+		})
+		log.Info("proxying moonlight-web", "upstream", cfg.BrowserUpstream.String(), "path", cfg.BrowserPath)
 	}
 
 	// Listen first: /healthz answers while the informers sync, /readyz
