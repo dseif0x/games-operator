@@ -17,15 +17,19 @@ import (
 // the first profile app's pipelines) and a dummy client, which is exactly
 // what a single-app pod needs.
 type Session struct {
-	ClientIP          string         `json:"client_ip"`
-	AESKey            string         `json:"aes_key"`
-	AESIV             string         `json:"aes_iv"`
-	RTSPFakeIP        string         `json:"rtsp_fake_ip"`
-	VideoWidth        int            `json:"video_width"`
-	VideoHeight       int            `json:"video_height"`
-	VideoRefreshRate  int            `json:"video_refresh_rate"`
-	AudioChannelCount int            `json:"audio_channel_count"`
-	ClientSettings    ClientSettings `json:"client_settings"`
+	ClientIP          string `json:"client_ip"`
+	AESKey            string `json:"aes_key"`
+	AESIV             string `json:"aes_iv"`
+	RTSPFakeIP        string `json:"rtsp_fake_ip"`
+	VideoWidth        int    `json:"video_width"`
+	VideoHeight       int    `json:"video_height"`
+	VideoRefreshRate  int    `json:"video_refresh_rate"`
+	AudioChannelCount int    `json:"audio_channel_count"`
+	// ClientSettings is left out on purpose: Wolf fills in its defaults,
+	// and its schema for the field changes between releases (a missing
+	// new key is a hard parse error). The app is our own container, so
+	// run_uid and friends do not apply anyway.
+	ClientSettings *ClientSettings `json:"client_settings,omitempty"`
 }
 
 // ClientSettings mirrors Wolf's per-client settings.

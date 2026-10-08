@@ -395,8 +395,11 @@ func BuildPod(a *store.App, cfg Config) *corev1.Pod {
 	wolfEnv := map[string]string{
 		// No PULSE_SERVER: Wolf then runs its own PulseAudio (supervisord in
 		// the image) with the socket in XDG_RUNTIME_DIR, which the app
-		// container shares and points PULSE_SERVER at.
+		// container shares and points PULSE_SERVER at. PulseAudio refuses an
+		// XDG_RUNTIME_DIR it does not own (the init container gives it to
+		// the app user), so it gets a runtime path of its own.
 		"XDG_RUNTIME_DIR":            RuntimeDir,
+		"PULSE_RUNTIME_PATH":         "/tmp/pulse-runtime",
 		"HOST_APPS_STATE_FOLDER":     "/mnt/data/wolf",
 		bridge.EnvSocket:             bridge.DefaultSocket,
 		"WOLF_CFG_FILE":              WolfDir + "/cfg/config.toml",

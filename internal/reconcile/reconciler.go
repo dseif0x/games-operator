@@ -443,7 +443,6 @@ func (r *Reconciler) ensureStream(ctx context.Context, app *store.App, o observe
 		RTSPFakeIP: ip,
 		VideoWidth: app.Stream.Width, VideoHeight: app.Stream.Height, VideoRefreshRate: app.Stream.FPS,
 		AudioChannelCount: channels,
-		ClientSettings:    wolf.DefaultClientSettings(),
 	})
 	if err != nil {
 		if r.timedOut(app) {
