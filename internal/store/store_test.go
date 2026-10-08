@@ -127,7 +127,7 @@ func exercise(t *testing.T, st Store) {
 	if len(ps) != 1 || ps[0].LastSeenAt == nil {
 		t.Fatalf("pairings: %+v", ps)
 	}
-	if err := st.Pairings().Delete(ctx, "other", "fp"); !errors.Is(err, ErrNotFound) {
+	if err := st.Pairings().Delete(ctx, "00000000-0000-4000-8000-000000000002", "fp"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("delete by other user: %v", err)
 	}
 	if err := st.Pairings().Delete(ctx, u.ID, "fp"); err != nil {
