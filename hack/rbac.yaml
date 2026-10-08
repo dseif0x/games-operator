@@ -1,0 +1,42 @@
+# Role and RoleBinding for a hub installed with rbac.create=false (release and
+# namespace both named games-operator). Same rules as templates/rbac.yaml.
+# Apply once as a cluster admin:
+#   kubectl apply -f https://raw.githubusercontent.com/dseif0x/games-operator/main/hack/rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: games-operator
+  namespace: games-operator
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch", "create", "update", "delete"]
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: games-operator
+  namespace: games-operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: games-operator
+subjects:
+  - kind: ServiceAccount
+    name: games-operator
+    namespace: games-operator

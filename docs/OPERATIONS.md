@@ -39,6 +39,12 @@ helm template games-operator charts/games-operator --namespace games-operator \
   --show-only templates/rbac.yaml | kubectl apply -f -
 ```
 
+For the default names (release and namespace `games-operator`) the rendered result is checked in as `hack/rbac.yaml`:
+
+```sh
+kubectl apply -f https://raw.githubusercontent.com/dseif0x/games-operator/main/hack/rbac.yaml
+```
+
 ## Networking
 
 - The chart's `-moonlight` Service (47989/47984 TCP) and every per-app Service share one LoadBalancer IP through `metallb.io/allow-shared-ip` / `lbipam.cilium.io/sharing-key`. Set `moonlight.loadBalancerIP` to pin it: that IP is what users add in Moonlight, and the hub needs it before the first Service exists.
