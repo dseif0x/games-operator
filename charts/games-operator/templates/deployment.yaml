@@ -77,8 +77,6 @@ spec:
               value: {{ .Values.moonlight.maxConcurrent | quote }}
             - name: GAMES_OPERATOR_WOLF_IMAGE
               value: {{ .Values.apps.wolfImage | quote }}
-            - name: GAMES_OPERATOR_PULSE_IMAGE
-              value: {{ .Values.apps.pulseImage | quote }}
             - name: GAMES_OPERATOR_INIT_IMAGE
               value: {{ .Values.apps.initImage | quote }}
             - name: GAMES_OPERATOR_BRIDGE_IMAGE

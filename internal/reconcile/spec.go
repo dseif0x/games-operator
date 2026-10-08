@@ -27,7 +27,6 @@ import (
 type Config struct {
 	Namespace       string
 	WolfImage       string
-	PulseImage      string
 	InitImage       string
 	BridgeImage     string // image:tag
 	ImagePullPolicy string
@@ -87,7 +86,6 @@ func (c Config) Defaults() Config {
 const (
 	ContainerApp    = "app"
 	ContainerWolf   = "wolf"
-	ContainerPulse  = "pulseaudio"
 	ContainerBridge = "wolf-bridge"
 	ContainerInit   = "init"
 
@@ -318,8 +316,8 @@ func Preset(a *store.App) preset.Preset {
 	return p
 }
 
-// BuildPod returns the desired Pod: the app container next to Wolf,
-// PulseAudio and the bridge, sharing one runtime directory.
+// BuildPod returns the desired Pod: the app container next to Wolf (which
+// brings its own PulseAudio) and the bridge, sharing one runtime directory.
 //
 // Game containers run as root, share the host IPC namespace, see
 // /dev/input and /dev/uinput and ask for capabilities; the namespace must
@@ -395,8 +393,10 @@ func BuildPod(a *store.App, cfg Config) *corev1.Pod {
 	}
 
 	wolfEnv := map[string]string{
+		// No PULSE_SERVER: Wolf then runs its own PulseAudio (supervisord in
+		// the image) with the socket in XDG_RUNTIME_DIR, which the app
+		// container shares and points PULSE_SERVER at.
 		"XDG_RUNTIME_DIR":            RuntimeDir,
-		"PULSE_SERVER":               "unix:" + RuntimeDir + "/pulse-socket",
 		"HOST_APPS_STATE_FOLDER":     "/mnt/data/wolf",
 		bridge.EnvSocket:             bridge.DefaultSocket,
 		"WOLF_CFG_FILE":              WolfDir + "/cfg/config.toml",
@@ -497,16 +497,6 @@ func BuildPod(a *store.App, cfg Config) *corev1.Pod {
 						RunAsUser: ptr.To[int64](0), RunAsGroup: ptr.To[int64](0),
 						Capabilities: &corev1.Capabilities{Add: []corev1.Capability{"NET_RAW", "MKNOD", "NET_ADMIN", "SYS_ADMIN", "SYS_NICE"}},
 					},
-				},
-				{
-					Name: ContainerPulse, Image: cfg.PulseImage, ImagePullPolicy: pull,
-					Env: envList(map[string]string{
-						"XDG_RUNTIME_DIR": RuntimeDir, "UNAME": "retro",
-						"PUID": strconv.FormatInt(AppUID, 10), "PGID": strconv.FormatInt(AppUID, 10), "TZ": cfg.TimeZone,
-					}),
-					Resources:       small("50m", "64Mi", "500m", "256Mi"),
-					VolumeMounts:    []corev1.VolumeMount{{Name: "runtime", MountPath: RuntimeDir}},
-					SecurityContext: &corev1.SecurityContext{RunAsUser: ptr.To[int64](0), RunAsGroup: ptr.To[int64](0)},
 				},
 				{
 					Name: ContainerBridge, Image: cfg.BridgeImage, ImagePullPolicy: pull,

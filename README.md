@@ -6,7 +6,7 @@ It is the sibling of [agents-operator](https://github.com/dseif0x/agents-operato
 
 ```
 Moonlight client ──47989/47984──▶ hub (Moonlight protocol: pair, applist, launch)
-                 ──RTSP/RTP/ENet─▶ app pod: app + wolf + pulseaudio + wolf-bridge
+                 ──RTSP/RTP/ENet─▶ app pod: app + wolf (with its own PulseAudio) + wolf-bridge
 browser ─▶ hub (/play, reverse proxy) ─▶ moonlight-web (embedded) ─▶ (same path, re-packetised onto WebRTC or a WebSocket)
 hub ──▶ Postgres (users, apps, pairings)   hub ──▶ Kubernetes (pods, PVCs, Services)
 ```

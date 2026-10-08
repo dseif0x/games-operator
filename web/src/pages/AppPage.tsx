@@ -4,7 +4,7 @@ import { Nav } from "../components/Nav";
 import { Link, navigate } from "../router";
 import { stateLabel, timeAgo } from "../util";
 
-const containers = ["app", "wolf", "pulseaudio", "wolf-bridge", "init"];
+const containers = ["app", "wolf", "wolf-bridge", "init"];
 
 export function AppPage(props: { id: string; user: User; onLogout: () => void }) {
   const [app, setApp] = useState<App | null>(null);

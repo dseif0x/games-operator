@@ -125,7 +125,6 @@ type Config struct {
 	CertDir string
 
 	WolfImage       string
-	PulseImage      string
 	InitImage       string
 	BridgeImage     string
 	BridgeImageTag  string
@@ -275,7 +274,6 @@ func load(get lookup) (*Config, error) {
 		MaxConcurrent:       integer("MAX_CONCURRENT", 10),
 		CertDir:             str("CERT_DIR", "/data/certs"),
 		WolfImage:           str("WOLF_IMAGE", "ghcr.io/games-on-whales/wolf:stable"),
-		PulseImage:          str("PULSE_IMAGE", "ghcr.io/games-on-whales/pulseaudio:master"),
 		InitImage:           str("INIT_IMAGE", "ghcr.io/games-on-whales/base:edge"),
 		BridgeImage:         str("BRIDGE_IMAGE", "ghcr.io/dseif0x/games-operator-bridge"),
 		BridgeImageTag:      str("BRIDGE_IMAGE_TAG", "latest"),

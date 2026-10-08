@@ -390,7 +390,7 @@ func (s *Service) Logs(ctx context.Context, ownerID, id, container string) ([]by
 		return nil, err
 	}
 	switch container {
-	case "", reconcile.ContainerApp, reconcile.ContainerWolf, reconcile.ContainerPulse, reconcile.ContainerBridge, reconcile.ContainerInit:
+	case "", reconcile.ContainerApp, reconcile.ContainerWolf, reconcile.ContainerBridge, reconcile.ContainerInit:
 	default:
 		return nil, &ValidationError{"unknown container " + container}
 	}

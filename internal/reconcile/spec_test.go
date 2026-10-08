@@ -13,7 +13,7 @@ import (
 
 func testCfg() Config {
 	return Config{
-		Namespace: "games", WolfImage: "wolf:test", PulseImage: "pulse:test", InitImage: "init:test", BridgeImage: "bridge:test",
+		Namespace: "games", WolfImage: "wolf:test", InitImage: "init:test", BridgeImage: "bridge:test",
 		DefaultPVCSize: "50Gi", DefaultStorageClass: "nfs-fast", RuntimeClass: "nvidia", LBSharingKey: "games", LBIP: "10.13.254.9",
 		DefaultResources: config.Resources{
 			Requests: config.ResourceList{CPU: "2", Memory: "4Gi"},
@@ -73,7 +73,7 @@ func TestBuildPod(t *testing.T) {
 	for _, c := range pod.Spec.Containers {
 		names[c.Name] = c
 	}
-	for _, want := range []string{ContainerApp, ContainerWolf, ContainerPulse, ContainerBridge} {
+	for _, want := range []string{ContainerApp, ContainerWolf, ContainerBridge} {
 		if _, ok := names[want]; !ok {
 			t.Fatalf("container %s missing", want)
 		}

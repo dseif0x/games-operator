@@ -40,8 +40,6 @@ moonlight:
 apps:
   # -- Wolf image (the Moonlight/GameStream host inside every app pod). Pinned by digest: the hub speaks Wolf's current API (sessions/add without app_id/client_id), and a `stable` cached on a node from before that API change would refuse it
   wolfImage: ghcr.io/games-on-whales/wolf:stable@sha256:b0ef253739f9bd49b71eba7e150c955fd05990c0d409e666d89236995351551a
-  # -- PulseAudio sidecar image
-  pulseImage: ghcr.io/games-on-whales/pulseaudio:master
   # -- Init container image (needs sh, chown, chmod, cp)
   initImage: ghcr.io/games-on-whales/base:edge
   bridge:

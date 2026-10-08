@@ -15,7 +15,7 @@ moonlight-web ──▶ /wolf/api/v1/pair/* (bearer token)                      
                       users, apps, pairings, events      ┌────────────────────────────┐
                                                          │ app (GOW image)            │
                       LoadBalancer IP (shared)           │ wolf  ◀─ RTSP/RTP/ENet ────┼── Moonlight
-                        :47989/:47984 → hub              │ pulseaudio                 │
+                        :47989/:47984 → hub              │ (Wolf embeds PulseAudio)   │
                         :48100+10·slot → app pod         │ wolf-bridge (:8443) ◀──────┼── hub
                                                          └────────────────────────────┘
 ```
