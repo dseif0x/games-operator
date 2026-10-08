@@ -97,7 +97,7 @@ browser:
     # -- Image of the games-operator fork of moonlight-web (embedded mode)
     repository: ghcr.io/dseif0x/moonlight-web
     # -- Fork tag (go-<version>)
-    tag: go-0.1.1
+    tag: go-0.1.2
     pullPolicy: IfNotPresent
   # -- Run on the node's network so WebRTC media (UDP 48550-48573) can reach browsers on the LAN directly; off, the stream always uses the WebSocket transport through the hub, which is what a tunnel or a firewall between subnets needs anyway
   hostNetwork: false
