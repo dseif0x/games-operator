@@ -289,6 +289,13 @@ func TestStartWarm(t *testing.T) {
 	if got.State != store.StateRunning || s.View(got).Streaming {
 		t.Fatalf("warm app must be running but not streaming: %s %v", got.State, s.View(got).Streaming)
 	}
+	// A cancel from a client whose launch failed must not throw the warm pod away.
+	if err := s.Cancel(ctx, u); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.Get(ctx, u.ID, a.ID); got.State != store.StateRunning {
+		t.Fatalf("cancel on a warm app must keep it: %s", got.State)
+	}
 	// Starting again is a no-op; a launch then streams at once.
 	if again, err := s.Start(ctx, u, a.ID); err != nil || again.State != store.StateRunning {
 		t.Fatalf("start twice: %v %+v", err, again)

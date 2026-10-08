@@ -578,11 +578,12 @@ func (s *Service) Cancel(ctx context.Context, user *store.User) error {
 	}
 	// A client that gave up waiting for /launch sends /cancel right after.
 	// Stopping now would throw away the pod (and the node that just woke
-	// up) moments before it is usable, so a starting app keeps starting;
-	// the idle stop reclaims it if nobody comes back. Quitting a running
-	// app is what /cancel means otherwise, and that still stops it.
-	if cur.State == store.StateStarting {
-		_ = s.Store.Events().Add(ctx, cur.ID, "moonlight", "cancel while starting ignored; the app keeps starting")
+	// up) moments before it is usable, so an app that has no stream yet
+	// (starting, or warm and waiting) keeps going; the idle stop reclaims
+	// it if nobody comes back. Quitting a streaming app is what /cancel
+	// means otherwise, and that still stops it.
+	if cur.State == store.StateStarting || cur.WolfSessionID == "" {
+		_ = s.Store.Events().Add(ctx, cur.ID, "moonlight", "cancel before any stream ignored; the app keeps running")
 		return nil
 	}
 	_, err = s.stop(ctx, cur, "moonlight")
