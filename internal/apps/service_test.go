@@ -70,7 +70,8 @@ func TestMoonlightID(t *testing.T) {
 	if a <= 0 || b <= 0 || a == b {
 		t.Fatal(a, b)
 	}
-	if MoonlightID("x") != MoonlightID("x") {
+	first, again := MoonlightID("x"), MoonlightID("x")
+	if first != again {
 		t.Fatal("not stable")
 	}
 }

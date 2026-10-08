@@ -22,6 +22,7 @@ linters:
         - G115 # port arithmetic is bounds-checked in config
         - G124 # cookies do set HttpOnly/Secure/SameSite; the checker misses struct literals
         - G404 # math/rand is not used for security
+        - G704 # the bridge forwards request paths to a fixed unix socket, not to a user-chosen host
         - G705 # JSON responses carry Content-Type: application/json
     revive:
       rules:

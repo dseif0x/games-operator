@@ -29,14 +29,26 @@ import (
 var version = "dev"
 
 func main() {
+	if err := run(); err != nil {
+		slog.Error("wolf-bridge exited", "err", err)
+		os.Exit(1)
+	}
+}
+
+// socketDialer connects to a unix socket with a bounded timeout.
+func socketDialer(path string, timeout time.Duration) func(context.Context) (net.Conn, error) {
+	d := &net.Dialer{Timeout: timeout}
+	return func(ctx context.Context) (net.Conn, error) { return d.DialContext(ctx, "unix", path) }
+}
+
+func run() error {
 	socket := flag.String("socket", envOr(bridge.EnvSocket, bridge.DefaultSocket), "path of Wolf's API socket")
 	listen := flag.String("listen", fmt.Sprintf(":%d", bridge.Port), "address to serve on")
 	flag.Parse()
 	token := os.Getenv(bridge.EnvToken)
 	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	if token == "" {
-		log.Error(bridge.EnvToken + " is required")
-		os.Exit(2)
+		return errors.New(bridge.EnvToken + " is required")
 	}
 	log.Info("wolf-bridge starting", "version", version, "socket", *socket, "listen", *listen)
 
@@ -50,7 +62,9 @@ func main() {
 
 	client := &http.Client{
 		Transport: &http.Transport{
-			DialContext: func(context.Context, string, string) (net.Conn, error) { return net.Dial("unix", *socket) },
+			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+				return socketDialer(*socket, 5*time.Second)(ctx)
+			},
 			// Wolf's HTTP server is HTTP/1.0 without keep-alive; one
 			// connection per request avoids stale sockets.
 			DisableKeepAlives: true,
@@ -82,13 +96,12 @@ func main() {
 	}()
 	select {
 	case err := <-errc:
-		log.Error("serve failed", "err", err)
-		os.Exit(1)
+		return err
 	case <-ctx.Done():
 	}
 	sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	_ = srv.Shutdown(sctx)
+	return srv.Shutdown(sctx)
 }
 
 func envOr(key, def string) string {
@@ -104,7 +117,7 @@ func watchSocket(ctx context.Context, path string, ready *atomic.Bool, log *slog
 	t := time.NewTicker(time.Second)
 	defer t.Stop()
 	for {
-		conn, err := net.DialTimeout("unix", path, time.Second)
+		conn, err := socketDialer(path, time.Second)(ctx)
 		if err == nil {
 			_ = conn.Close()
 			if ready.CompareAndSwap(false, true) {
@@ -222,7 +235,7 @@ func (t *streamTracker) follow(ctx context.Context, socket string, ready *atomic
 }
 
 func (t *streamTracker) subscribe(ctx context.Context, socket string) error {
-	conn, err := net.DialTimeout("unix", socket, 2*time.Second)
+	conn, err := socketDialer(socket, 2*time.Second)(ctx)
 	if err != nil {
 		return err
 	}

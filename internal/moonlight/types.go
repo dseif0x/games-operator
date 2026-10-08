@@ -6,8 +6,8 @@ package moonlight
 
 import "encoding/xml"
 
-// Responsable is any XML response carrying a status code.
-type Responsable interface {
+// XMLResponse is any XML response carrying a status code.
+type XMLResponse interface {
 	GetStatusCode() int
 }
 
@@ -18,13 +18,13 @@ type Response struct {
 	StatusMessage string   `xml:"status_message,attr,omitempty"`
 }
 
-// GetStatusCode implements Responsable.
+// GetStatusCode implements XMLResponse.
 func (r Response) GetStatusCode() int { return r.StatusCode }
 
 // ServerInfoResponse answers /serverinfo.
 type ServerInfoResponse struct {
-	Response   `xml:",inline"`
-	ServerInfo `xml:",inline"`
+	Response
+	ServerInfo
 }
 
 // ServerInfo is what Moonlight shows about a host.
@@ -59,8 +59,8 @@ type DisplayMode struct {
 
 // AppListResponse answers /applist.
 type AppListResponse struct {
-	Response `xml:",inline"`
-	Apps     []AppEntry `xml:"App"`
+	Response
+	Apps []AppEntry `xml:"App"`
 }
 
 // AppEntry is one app in the list.
@@ -73,14 +73,14 @@ type AppEntry struct {
 
 // LaunchResponse answers /launch and /resume.
 type LaunchResponse struct {
-	Response       `xml:",inline"`
+	Response
 	RTSPSessionURL string `xml:"sessionUrl0"`
 	GameSession    int    `xml:"gamesession"`
 }
 
 // PairingResponse answers the /pair phases.
 type PairingResponse struct {
-	Response          `xml:",inline"`
+	Response
 	Paired            int    `xml:"paired"`
 	PlainCert         string `xml:"plaincert,omitempty"`
 	ChallengeResponse string `xml:"challengeresponse,omitempty"`

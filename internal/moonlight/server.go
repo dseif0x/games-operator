@@ -90,7 +90,10 @@ func (s *Server) Run(ctx context.Context) error {
 			// Any client certificate is accepted at the TLS layer; the
 			// authenticated middleware matches it against the pairings.
 			VerifyPeerCertificate: func([][]byte, [][]*x509.Certificate) error { return nil },
-			MinVersion:            tls.VersionTLS12,
+			VerifyConnection:      func(tls.ConnectionState) error { return nil },
+			// No resumption: every connection presents its certificate.
+			SessionTicketsDisabled: true,
+			MinVersion:             tls.VersionTLS12,
 		},
 	}
 	ctx, cancel := context.WithCancel(ctx)
@@ -379,7 +382,7 @@ func parseMode(mode string) (width, height, fps int, err error) {
 	return nums[0], nums[1], nums[2], nil
 }
 
-func sendXML(w http.ResponseWriter, log *slog.Logger, resp Responsable) {
+func sendXML(w http.ResponseWriter, log *slog.Logger, resp XMLResponse) {
 	b, err := xml.Marshal(resp)
 	if err != nil {
 		writeError(w, log, 500, fmt.Errorf("marshal response: %w", err))

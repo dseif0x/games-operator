@@ -62,7 +62,7 @@ func (c *client) do(method, path string, body any) (int, map[string]any) {
 	return res.StatusCode, out
 }
 
-func newServer(t *testing.T) (*httptest.Server, *client, store.Store) {
+func newServer(t *testing.T) (*httptest.Server, *client) {
 	t.Helper()
 	st := store.NewMemory()
 	hash, _ := auth.HashPassword("secret")
@@ -85,19 +85,18 @@ func newServer(t *testing.T) (*httptest.Server, *client, store.Store) {
 	srv := httptest.NewServer(s.Handler())
 	t.Cleanup(srv.Close)
 	jar, _ := cookiejar.New(nil)
-	return srv, &client{t: t, base: srv.URL, http: &http.Client{Jar: jar}}, st
+	return srv, &client{t: t, base: srv.URL, http: &http.Client{Jar: jar}}
 }
 
 func TestLoginAndApps(t *testing.T) {
-	_, c, _ := newServer(t)
+	_, c := newServer(t)
 	if code, _ := c.do("GET", "/api/v1/apps", nil); code != 401 {
 		t.Fatalf("unauthenticated: %d", code)
 	}
-	code, out := c.do("POST", "/api/v1/auth/login", map[string]string{"username": "admin", "password": "wrong"})
-	if code != 401 {
+	if code, _ := c.do("POST", "/api/v1/auth/login", map[string]string{"username": "admin", "password": "wrong"}); code != 401 {
 		t.Fatalf("bad password: %d", code)
 	}
-	code, out = c.do("POST", "/api/v1/auth/login", map[string]string{"username": "admin", "password": "secret"})
+	code, out := c.do("POST", "/api/v1/auth/login", map[string]string{"username": "admin", "password": "secret"})
 	if code != 200 {
 		t.Fatalf("login: %d %v", code, out)
 	}
@@ -137,7 +136,7 @@ func TestLoginAndApps(t *testing.T) {
 }
 
 func TestWolfCompatAPI(t *testing.T) {
-	srv, c, _ := newServer(t)
+	srv, c := newServer(t)
 	_, out := c.do("POST", "/api/v1/auth/login", map[string]string{"username": "admin", "password": "secret"})
 	c.csrf, _ = out["csrf"].(string)
 	code, out := c.do("POST", "/api/v1/me/api-token", nil)
@@ -177,7 +176,7 @@ func TestWolfCompatAPI(t *testing.T) {
 }
 
 func TestHostAllowlist(t *testing.T) {
-	srv, _, _ := newServer(t)
+	srv, _ := newServer(t)
 	req, _ := http.NewRequest("GET", srv.URL+"/api/v1/apps", nil)
 	req.Host = "evil.example.com"
 	res, err := http.DefaultClient.Do(req)
