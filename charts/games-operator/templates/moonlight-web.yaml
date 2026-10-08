@@ -1,0 +1,94 @@
+{{- if .Values.browser.enabled }}
+# moonlight-web: a Moonlight client that re-packetises the stream onto
+# WebRTC for the browser. It pairs with the hub like any other client; the
+# user's API token (account page) lets it enter the PIN on its own.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "games-operator.fullname" . }}-moonlight-web
+  labels:
+    {{- include "games-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: moonlight-web
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "games-operator.browserSelectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "games-operator.browserSelectorLabels" . | nindent 8 }}
+    spec:
+      automountServiceAccountToken: false
+      hostNetwork: {{ .Values.browser.hostNetwork }}
+      {{- if .Values.browser.hostNetwork }}
+      dnsPolicy: ClusterFirstWithHostNet
+      {{- end }}
+      {{- with .Values.browser.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: moonlight-web
+          image: "{{ .Values.browser.image.repository }}:{{ .Values.browser.image.tag }}"
+          imagePullPolicy: {{ .Values.browser.image.pullPolicy }}
+          env:
+            - name: MW_HTTPS_PORT
+              value: {{ .Values.browser.httpsPort | quote }}
+            - name: MW_HTTP_PORT
+              value: {{ .Values.browser.httpPort | quote }}
+            - name: MW_UPNP
+              value: "0"
+            - name: TZ
+              value: {{ .Values.apps.timeZone | quote }}
+          ports:
+            - name: https
+              containerPort: {{ .Values.browser.httpsPort }}
+              protocol: TCP
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          resources:
+            {{- toYaml .Values.browser.resources | nindent 12 }}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "games-operator.fullname" . }}-moonlight-web
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "games-operator.fullname" . }}-moonlight-web
+  labels:
+    {{- include "games-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: moonlight-web
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  accessModes: ["ReadWriteOnce"]
+  {{- with .Values.browser.storageClass }}
+  storageClassName: {{ . }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.browser.size }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "games-operator.fullname" . }}-moonlight-web
+  labels:
+    {{- include "games-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: moonlight-web
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ .Values.browser.httpsPort }}
+      targetPort: https
+      protocol: TCP
+      name: https
+  selector:
+    {{- include "games-operator.browserSelectorLabels" . | nindent 4 }}
+{{- end }}

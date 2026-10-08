@@ -1,0 +1,75 @@
+name: release-chart
+
+# Runs after release-images succeeds for a tag, so the chart never points
+# at images that do not exist yet. Can also be run by hand for a tag.
+on:
+  workflow_run:
+    workflows: ["release-images"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release the chart for (e.g. v1.2.3)"
+        required: true
+
+permissions:
+  contents: write
+  pages: write
+
+jobs:
+  chart:
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && startsWith(github.event.workflow_run.head_branch, 'v')) }}
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.event.inputs.tag || github.event.workflow_run.head_branch }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+          fetch-depth: 0
+      - name: git identity
+        run: |
+          git config user.name "$GITHUB_ACTOR"
+          git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.19.0
+      - name: set chart version and appVersion from the tag
+        run: |
+          v="${TAG#v}"
+          yq -i ".version = \"$v\" | .appVersion = \"$v\"" charts/games-operator/Chart.yaml
+          cat charts/games-operator/Chart.yaml
+      - run: helm dependency update charts/games-operator
+      - run: helm lint charts/games-operator --strict
+      - name: install chart-releaser
+        uses: helm/chart-releaser-action@v1
+        with:
+          install_only: true
+      - name: package chart
+        run: |
+          mkdir -p .cr-release-packages
+          helm package charts/games-operator -d .cr-release-packages
+          ls -l .cr-release-packages
+      # The chart is attached to the vX.Y.Z release that release-images
+      # created, so this workflow never has to create a tag or a release of
+      # its own (which the Actions token cannot do once immutable releases
+      # or tag rules are enabled).
+      - name: attach chart to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "$TAG" --generate-notes
+          gh release upload "$TAG" .cr-release-packages/games-operator-${TAG#v}.tgz --clobber
+      - name: update index.yaml on gh-pages
+        env:
+          CR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p .cr-index
+          cr index \
+            --owner "${GITHUB_REPOSITORY%%/*}" \
+            --git-repo "${GITHUB_REPOSITORY#*/}" \
+            --pages-branch gh-pages \
+            --package-path .cr-release-packages \
+            --release-name-template "v{{ .Version }}" \
+            --index-path .cr-index/index.yaml \
+            --push

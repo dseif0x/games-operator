@@ -1,0 +1,83 @@
+name: ci
+
+# Pushes to main are checked; tags run the release workflows. Nothing runs
+# on pull requests.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go:
+    name: go vet, lint, test
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: games_operator
+          POSTGRES_PASSWORD: games_operator
+          POSTGRES_DB: games_operator_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U games_operator"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: go vet ./...
+      - uses: golangci/golangci-lint-action@v8
+        with:
+          version: latest
+      - name: go test
+        env:
+          GAMES_OPERATOR_TEST_DATABASE_URL: postgres://games_operator:games_operator@localhost:5432/games_operator_test?sslmode=disable
+        run: go test -race -count=1 ./...
+      - name: build (stub UI, no Node needed)
+        run: go build ./...
+
+  web:
+    name: web build and embed
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci --no-audit --no-fund
+        working-directory: web
+      - run: npm run build
+        working-directory: web
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: go build -tags ui
+        run: go build -tags ui ./...
+
+  chart:
+    name: helm lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.19.0
+      - run: helm dependency update charts/games-operator
+      - run: helm lint charts/games-operator --strict
+      - name: template renders
+        run: helm template hub charts/games-operator --set postgresql.enabled=false --set database.url=postgres://x --set browser.enabled=true >/dev/null

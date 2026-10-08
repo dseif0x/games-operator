@@ -1,0 +1,213 @@
+# Default values for games-operator.
+# Only one replica is supported: the reconciler, the informers and the
+# Moonlight pairing state must not run twice (strategy Recreate).
+
+image:
+  # -- Hub image repository
+  repository: ghcr.io/dseif0x/games-operator
+  # -- Hub image tag; defaults to .Chart.AppVersion
+  tag: ""
+  # -- Hub image pull policy
+  pullPolicy: IfNotPresent
+
+# -- Image pull secrets for the hub
+imagePullSecrets: []
+
+# -- Override the chart name
+nameOverride: ""
+# -- Override the full release name
+fullnameOverride: ""
+
+# -- Public URL of the web UI; cookies and the host allowlist derive from it
+publicUrl: https://games.example.com
+# -- Extra allowed Host header values (the publicUrl host is always allowed)
+allowedHosts: []
+
+moonlight:
+  # -- Host name Moonlight clients see
+  hostname: games-operator
+  # -- LoadBalancer IP for the Moonlight front door and every stream; empty lets the pool choose (then the sharing key keeps them on one IP)
+  loadBalancerIP: ""
+  # -- MetalLB `allow-shared-ip` / Cilium `sharing-key` value shared by the Moonlight Service and the per-app stream Services
+  sharingKey: games-operator
+  # -- First port of the per-app stream port sets (RTSP, control, video, audio), 10 ports per slot
+  streamPortBase: 48100
+  # -- Number of stream slots, i.e. apps that can run at the same time (across all users)
+  maxConcurrent: 10
+  # -- Extra annotations on the Moonlight LoadBalancer Service
+  serviceAnnotations: {}
+
+apps:
+  # -- Wolf image (the Moonlight/GameStream host inside every app pod)
+  wolfImage: ghcr.io/games-on-whales/wolf:stable
+  # -- PulseAudio sidecar image
+  pulseImage: ghcr.io/games-on-whales/pulseaudio:master
+  # -- Init container image (needs sh, chown, chmod, cp)
+  initImage: ghcr.io/games-on-whales/base:edge
+  bridge:
+    # -- wolf-bridge sidecar image repository (built from this repo)
+    repository: ghcr.io/dseif0x/games-operator-bridge
+    # -- wolf-bridge image tag; defaults to .Chart.AppVersion
+    tag: ""
+  # -- Pull policy for every image in app pods
+  pullPolicy: IfNotPresent
+  # -- runtimeClassName for app pods; `nvidia` makes the GPU and driver libraries visible to every container (via NVIDIA_VISIBLE_DEVICES=all)
+  runtimeClassName: nvidia
+  # -- Also request one `nvidia.com/gpu` for the wolf container (only needed when the device plugin ignores NVIDIA_VISIBLE_DEVICES; costs a second GPU slot unless time-slicing is on)
+  wolfGpuRequest: false
+  # -- Extended resource that hands /dev/uinput to app containers (generic-device-plugin, e.g. `squat.ai/uinput`); empty mounts /dev/uinput as a hostPath
+  uinputResource: ""
+  # -- Pin Wolf to one DRI render node (e.g. /dev/dri/renderD128); empty lets Wolf pick
+  renderNode: ""
+  # -- Time zone inside app pods
+  timeZone: Etc/UTC
+  # -- StorageClass for app home volumes (empty = cluster default). A local disk on the GPU node is a good choice: game libraries are large and re-downloadable
+  storageClass: ""
+  # -- Default home volume size for new apps
+  defaultSize: 50Gi
+  # -- Resources an app gets when it asks for nothing; the GPU goes to every app
+  resources:
+    requests:
+      cpu: "2"
+      memory: 4Gi
+    limits:
+      cpu: "8"
+      memory: 16Gi
+      nvidia.com/gpu: 1
+  # -- The most an app may ask for, per limit; a limit left out here is capped at its default
+  maxResources: {}
+  # -- Node selector applied to every app pod (usually the GPU node)
+  nodeSelector: {}
+  # -- Tolerations applied to every app pod
+  tolerations:
+    - key: nvidia.com/gpu
+      operator: Exists
+      effect: NoSchedule
+  # -- Extra non-secret env injected into every app container
+  extraEnv: {}
+  # -- Stop a running app this long after its last stream ended (0 = never)
+  idleStopAfter: 15m
+
+browser:
+  # -- Deploy moonlight-web (github.com/linckosz/moonlight-web), a Moonlight client that streams into the browser over WebRTC
+  enabled: false
+  image:
+    # -- moonlight-web image
+    repository: ghcr.io/linckosz/moonlight-web
+    # -- moonlight-web tag (a release; there is no `edge`)
+    tag: latest
+    pullPolicy: IfNotPresent
+  # -- Public URL of moonlight-web, shown as "Play in browser"; empty hides the link
+  url: ""
+  # -- Run on the node's network so WebRTC media (UDP 48550-48573) reaches the browser directly instead of falling back to TCP; needs a Pod Security level that allows hostNetwork (the namespace is `privileged` anyway)
+  hostNetwork: true
+  # -- HTTPS port (443 needs root or hostNetwork on a free port)
+  httpsPort: 8443
+  # -- HTTP redirect port
+  httpPort: 8080
+  # -- Node selector for the moonlight-web pod (pin it to one node when hostNetwork is on)
+  nodeSelector: {}
+  # -- Size of its /data volume (settings, TLS, pairings)
+  size: 1Gi
+  # -- StorageClass for /data
+  storageClass: ""
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: "4"
+      memory: 2Gi
+
+auth:
+  # -- argon2id hash for the admin user (`games-operator hash-password`); if empty a random password is generated
+  adminPasswordHash: ""
+  # -- Admin username
+  adminUsername: admin
+  # -- 32 bytes hex used to sign session cookies; generated if empty
+  cookieSecret: ""
+  # -- Existing Secret with keys `cookieSecret` and `adminPasswordHash` (or `adminPassword`); skips generation
+  existingSecret: ""
+
+persistence:
+  # -- Size of the hub's data volume (the Moonlight server certificate; clients pin it when they pair, so it must survive restarts)
+  size: 100Mi
+  # -- StorageClass for the hub's data volume (empty = cluster default)
+  storageClass: ""
+
+ingress:
+  # -- Create an Ingress for the web UI
+  enabled: true
+  # -- Ingress class
+  className: traefik
+  # -- Ingress annotations
+  annotations: {}
+  # -- Ingress host
+  host: games.example.com
+  # -- Terminate TLS
+  tls: true
+  # -- TLS secret name; defaults to <fullname>-tls
+  tlsSecretName: ""
+
+postgresql:
+  # -- Install the Bitnami PostgreSQL subchart
+  enabled: true
+  auth:
+    database: games_operator
+    username: games_operator
+  primary:
+    persistence:
+      size: 2Gi
+
+database:
+  # -- Database URL used only when postgresql.enabled=false
+  url: ""
+  # -- Existing Secret holding the database URL (alternative to database.url)
+  existingSecret: ""
+  # -- Key in database.existingSecret
+  existingSecretKey: url
+
+metrics:
+  serviceMonitor:
+    # -- Create a ServiceMonitor for kube-prometheus-stack
+    enabled: false
+    # -- Extra labels for the ServiceMonitor
+    labels: {}
+    # -- Scrape interval
+    interval: 30s
+
+service:
+  # -- Web/API Service type
+  type: ClusterIP
+  # -- Web/API Service port
+  port: 80
+
+# -- Hub resources
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: "1"
+    memory: 512Mi
+
+# -- Hub node selector
+nodeSelector: {}
+# -- Hub tolerations
+tolerations: []
+# -- Hub affinity
+affinity: {}
+# -- Extra pod annotations for the hub
+podAnnotations: {}
+# -- Extra env for the hub container (list of EnvVar)
+extraEnv: []
+# -- Hub log level: debug, info, warn, error
+logLevel: info
+
+serviceAccount:
+  # -- Create the ServiceAccount
+  create: true
+  # -- ServiceAccount name; defaults to the fullname
+  name: ""
+  # -- ServiceAccount annotations
+  annotations: {}

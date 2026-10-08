@@ -1,0 +1,213 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "games-operator.fullname" . }}
+  labels:
+    {{- include "games-operator.labels" . | nindent 4 }}
+spec:
+  # One replica only: reconciler, informers and pairing state are single-instance.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "games-operator.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "games-operator.selectorLabels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ toJson .Values | sha256sum | trunc 32 }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "games-operator.serviceAccountName" . }}
+      automountServiceAccountToken: true
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: hub
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+            - name: moonlight
+              containerPort: 47989
+              protocol: TCP
+            - name: moonlight-tls
+              containerPort: 47984
+              protocol: TCP
+          env:
+            - name: GAMES_OPERATOR_LISTEN_ADDR
+              value: ":8080"
+            - name: GAMES_OPERATOR_PUBLIC_URL
+              value: {{ .Values.publicUrl | quote }}
+            - name: GAMES_OPERATOR_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: GAMES_OPERATOR_CERT_DIR
+              value: /data/certs
+            - name: GAMES_OPERATOR_MOONLIGHT_HOSTNAME
+              value: {{ .Values.moonlight.hostname | quote }}
+            - name: GAMES_OPERATOR_LB_SHARING_KEY
+              value: {{ .Values.moonlight.sharingKey | quote }}
+            - name: GAMES_OPERATOR_LB_IP
+              value: {{ .Values.moonlight.loadBalancerIP | quote }}
+            - name: GAMES_OPERATOR_STREAM_PORT_BASE
+              value: {{ .Values.moonlight.streamPortBase | quote }}
+            - name: GAMES_OPERATOR_MAX_CONCURRENT
+              value: {{ .Values.moonlight.maxConcurrent | quote }}
+            - name: GAMES_OPERATOR_WOLF_IMAGE
+              value: {{ .Values.apps.wolfImage | quote }}
+            - name: GAMES_OPERATOR_PULSE_IMAGE
+              value: {{ .Values.apps.pulseImage | quote }}
+            - name: GAMES_OPERATOR_INIT_IMAGE
+              value: {{ .Values.apps.initImage | quote }}
+            - name: GAMES_OPERATOR_BRIDGE_IMAGE
+              value: {{ .Values.apps.bridge.repository | quote }}
+            - name: GAMES_OPERATOR_BRIDGE_IMAGE_TAG
+              value: {{ .Values.apps.bridge.tag | default .Chart.AppVersion | quote }}
+            - name: GAMES_OPERATOR_IMAGE_PULL_POLICY
+              value: {{ .Values.apps.pullPolicy | quote }}
+            - name: GAMES_OPERATOR_RUNTIME_CLASS
+              value: {{ .Values.apps.runtimeClassName | quote }}
+            - name: GAMES_OPERATOR_WOLF_GPU_REQUEST
+              value: {{ .Values.apps.wolfGpuRequest | quote }}
+            - name: GAMES_OPERATOR_UINPUT_RESOURCE
+              value: {{ .Values.apps.uinputResource | quote }}
+            - name: GAMES_OPERATOR_RENDER_NODE
+              value: {{ .Values.apps.renderNode | quote }}
+            - name: GAMES_OPERATOR_TIMEZONE
+              value: {{ .Values.apps.timeZone | quote }}
+            - name: GAMES_OPERATOR_DEFAULT_STORAGE_CLASS
+              value: {{ .Values.apps.storageClass | quote }}
+            - name: GAMES_OPERATOR_DEFAULT_PVC_SIZE
+              value: {{ .Values.apps.defaultSize | quote }}
+            - name: GAMES_OPERATOR_DEFAULT_RESOURCES
+              value: {{ .Values.apps.resources | toJson | quote }}
+            - name: GAMES_OPERATOR_MAX_RESOURCES
+              value: {{ .Values.apps.maxResources | toJson | quote }}
+            - name: GAMES_OPERATOR_NODE_SELECTOR
+              value: {{ .Values.apps.nodeSelector | toJson | quote }}
+            - name: GAMES_OPERATOR_TOLERATIONS
+              value: {{ .Values.apps.tolerations | toJson | quote }}
+            - name: GAMES_OPERATOR_EXTRA_ENV
+              value: {{ .Values.apps.extraEnv | toJson | quote }}
+            - name: GAMES_OPERATOR_IDLE_STOP_AFTER
+              value: {{ .Values.apps.idleStopAfter | quote }}
+            - name: GAMES_OPERATOR_BROWSER_URL
+              value: {{ .Values.browser.url | quote }}
+            - name: GAMES_OPERATOR_ALLOWED_HOSTS
+              value: {{ join "," .Values.allowedHosts | quote }}
+            - name: GAMES_OPERATOR_LOG_LEVEL
+              value: {{ .Values.logLevel | quote }}
+            - name: GAMES_OPERATOR_ADMIN_USERNAME
+              value: {{ .Values.auth.adminUsername | quote }}
+            - name: GAMES_OPERATOR_COOKIE_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "games-operator.authSecretName" . }}
+                  key: cookieSecret
+            - name: GAMES_OPERATOR_ADMIN_PASSWORD_HASH
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "games-operator.authSecretName" . }}
+                  key: adminPasswordHash
+                  optional: true
+            - name: GAMES_OPERATOR_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "games-operator.authSecretName" . }}
+                  key: adminPassword
+                  optional: true
+            {{- if .Values.postgresql.enabled }}
+            - name: GAMES_OPERATOR_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.postgresql.auth.existingSecret | default (include "games-operator.postgresqlHost" .) }}
+                  key: {{ if .Values.postgresql.auth.existingSecret }}{{ .Values.postgresql.auth.secretKeys.userPasswordKey | default "password" }}{{ else }}password{{ end }}
+            - name: GAMES_OPERATOR_DATABASE_URL
+              value: "postgres://{{ .Values.postgresql.auth.username }}:$(GAMES_OPERATOR_DB_PASSWORD)@{{ include "games-operator.postgresqlHost" . }}:5432/{{ .Values.postgresql.auth.database }}?sslmode=disable"
+            {{- else if .Values.database.existingSecret }}
+            - name: GAMES_OPERATOR_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.database.existingSecret }}
+                  key: {{ .Values.database.existingSecretKey }}
+            {{- else }}
+            - name: GAMES_OPERATOR_DATABASE_URL
+              value: {{ required "database.url is required when postgresql.enabled=false" .Values.database.url | quote }}
+            {{- end }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "games-operator.fullname" . }}-data
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+# The Moonlight server certificate lives here; clients pin it when they
+# pair, so it has to outlive the pod.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "games-operator.fullname" . }}-data
+  labels:
+    {{- include "games-operator.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  accessModes: ["ReadWriteOnce"]
+  {{- with .Values.persistence.storageClass }}
+  storageClassName: {{ . }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.persistence.size }}

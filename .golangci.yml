@@ -1,0 +1,49 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: standard
+  enable:
+    - bodyclose
+    - errorlint
+    - gocritic
+    - gosec
+    - misspell
+    - noctx
+    - revive
+    - unconvert
+    - unparam
+  settings:
+    gosec:
+      excludes:
+        - G101 # credential *names* (env var constants), not values
+        - G115 # port arithmetic is bounds-checked in config
+        - G124 # cookies do set HttpOnly/Secure/SameSite; the checker misses struct literals
+        - G404 # math/rand is not used for security
+        - G705 # JSON responses carry Content-Type: application/json
+    revive:
+      rules:
+        - name: exported
+          disabled: true
+        - name: package-comments
+          disabled: true
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - std-error-handling
+    rules:
+      - path: _test\.go
+        linters:
+          - gosec
+          - noctx
+          - bodyclose
+          - errorlint
+
+formatters:
+  enable:
+    - gofmt
+    - goimports

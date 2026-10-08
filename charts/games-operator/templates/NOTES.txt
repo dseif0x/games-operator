@@ -1,0 +1,20 @@
+games-operator {{ .Chart.AppVersion }} is installed in namespace {{ .Release.Namespace }}.
+
+Web UI: {{ .Values.publicUrl }}
+Login:  {{ .Values.auth.adminUsername }}
+{{- if .Values.auth.existingSecret }}
+Password: from your Secret {{ .Values.auth.existingSecret }}.
+{{- else if .Values.auth.adminPasswordHash }}
+Password: the one you hashed into auth.adminPasswordHash.
+{{- else }}
+Password: generated. Read it with
+  kubectl -n {{ .Release.Namespace }} get secret {{ include "games-operator.authSecretName" . }} -o jsonpath='{.data.adminPassword}' | base64 -d; echo
+{{- end }}
+
+Moonlight host: the LoadBalancer IP of
+  kubectl -n {{ .Release.Namespace }} get svc {{ include "games-operator.fullname" . }}-moonlight
+Add it in Moonlight, press pair, type the PIN on the "Pair" page of the web UI.
+
+App pods run in this namespace as root with hostIPC and /dev/input; label it
+  kubectl label ns {{ .Release.Namespace }} pod-security.kubernetes.io/enforce=privileged
+if Pod Security Admission is enforced. Do not scale the hub above one replica.
