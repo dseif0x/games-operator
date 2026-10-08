@@ -18,7 +18,7 @@ nameOverride: ""
 # -- Override the full release name
 fullnameOverride: ""
 
-# -- Public URL of the web UI; cookies and the host allowlist derive from it
+# -- Public URL of the web UI; cookies and the host allowlist derive from it. With browser.enabled it needs a path (e.g. https://games.example.com/hub): moonlight-web takes the root of the host and the hub lives below the path
 publicUrl: https://games.example.com
 # -- Extra allowed Host header values (the publicUrl host is always allowed)
 allowedHosts: []
@@ -89,18 +89,18 @@ apps:
   idleStopAfter: 15m
 
 browser:
-  # -- Deploy moonlight-web (github.com/linckosz/moonlight-web), a Moonlight client that streams into the browser over WebRTC
+  # -- Deploy moonlight-web (github.com/linckosz/moonlight-web), a Moonlight client that streams into the browser. The hub reverse-proxies it at the root of publicUrl's host, so it shares the Ingress, certificate and any tunnel; set publicUrl to a path such as /hub
   enabled: false
+  # -- URL of a moonlight-web you run elsewhere, for the "Play in browser" link (only when enabled is false)
+  externalUrl: ""
   image:
     # -- moonlight-web image
     repository: ghcr.io/linckosz/moonlight-web
     # -- moonlight-web tag (a release; there is no `edge`)
     tag: latest
     pullPolicy: IfNotPresent
-  # -- Public URL of moonlight-web, shown as "Play in browser"; empty hides the link
-  url: ""
-  # -- Run on the node's network so WebRTC media (UDP 48550-48573) reaches the browser directly instead of falling back to TCP; needs a Pod Security level that allows hostNetwork (the namespace is `privileged` anyway)
-  hostNetwork: true
+  # -- Run on the node's network so WebRTC media (UDP 48550-48573) can reach browsers on the LAN directly; off, the stream always uses the WebSocket transport through the hub, which is what a tunnel or a firewall between subnets needs anyway
+  hostNetwork: false
   # -- HTTPS port (443 needs root or hostNetwork on a free port)
   httpsPort: 8443
   # -- HTTP redirect port

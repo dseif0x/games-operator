@@ -58,3 +58,35 @@ func TestResourceListJSON(t *testing.T) {
 		t.Fatalf("round trip: %s", b)
 	}
 }
+
+func TestBasePathAndBrowserUpstream(t *testing.T) {
+	base := map[string]string{
+		"GAMES_OPERATOR_DATABASE_URL":  "postgres://x",
+		"GAMES_OPERATOR_COOKIE_SECRET": strings.Repeat("ab", 32),
+	}
+	with := func(kv ...string) map[string]string {
+		m := map[string]string{}
+		for k, v := range base {
+			m[k] = v
+		}
+		for i := 0; i < len(kv); i += 2 {
+			m[kv[i]] = kv[i+1]
+		}
+		return m
+	}
+	c, err := load(env(with("GAMES_OPERATOR_PUBLIC_URL", "https://games.example.com/hub/", "GAMES_OPERATOR_BROWSER_UPSTREAM", "https://mw:8443")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.BasePath != "/hub" || c.BrowserURL != "https://games.example.com/" || c.BrowserUpstream.Host != "mw:8443" {
+		t.Fatalf("base %q browser %q upstream %v", c.BasePath, c.BrowserURL, c.BrowserUpstream)
+	}
+	c, err = load(env(with("GAMES_OPERATOR_PUBLIC_URL", "https://games.example.com", "GAMES_OPERATOR_BROWSER_URL", "https://play.example.com")))
+	if err != nil || c.BasePath != "" || c.BrowserURL != "https://play.example.com" {
+		t.Fatalf("root: %v base %q browser %q", err, c.BasePath, c.BrowserURL)
+	}
+	_, err = load(env(with("GAMES_OPERATOR_PUBLIC_URL", "https://games.example.com", "GAMES_OPERATOR_BROWSER_UPSTREAM", "https://mw:8443")))
+	if err == nil || !strings.Contains(err.Error(), "PUBLIC_URL needs a path") {
+		t.Fatalf("upstream at the root must be rejected: %v", err)
+	}
+}

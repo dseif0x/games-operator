@@ -1,3 +1,4 @@
+import { href } from "./router";
 // Thin fetch wrapper for /api/v1. Cookie auth, CSRF header on writes.
 
 export interface User {
@@ -125,7 +126,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   const headers: Record<string, string> = { Accept: "application/json" };
   if (body !== undefined) headers["Content-Type"] = "application/json";
   if (method !== "GET" && csrf) headers["X-CSRF-Token"] = csrf;
-  const res = await fetch("/api/v1" + path, {
+  const res = await fetch(href("/api/v1" + path), {
     method,
     headers,
     credentials: "same-origin",
@@ -159,7 +160,7 @@ export const api = {
   stopApp: (id: string) => request<App>("POST", `/apps/${id}/stop`),
   appEvents: (id: string) => request<{ events: AppEvent[] }>("GET", `/apps/${id}/events`),
   appLogs: async (id: string, container: string) => {
-    const res = await fetch(`/api/v1/apps/${id}/logs?container=${encodeURIComponent(container)}`, { credentials: "same-origin" });
+    const res = await fetch(href(`/api/v1/apps/${id}/logs?container=${encodeURIComponent(container)}`), { credentials: "same-origin" });
     const text = await res.text();
     if (!res.ok) {
       try {
@@ -187,7 +188,7 @@ export function subscribeApps(onEvent: (type: "app" | "deleted", id: string, app
   let retry = 1000;
   const connect = () => {
     if (stopped) return;
-    es = new EventSource("/api/v1/apps/events");
+    es = new EventSource(href("/api/v1/apps/events"));
     es.onopen = () => {
       retry = 1000;
       onOpen?.();

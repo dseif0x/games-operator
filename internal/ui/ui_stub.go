@@ -10,7 +10,7 @@ import "net/http"
 const Built = false
 
 // Handler returns 503 for every page: the binary was built without -tags ui.
-func Handler() http.Handler {
+func Handler(_ string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusServiceUnavailable)

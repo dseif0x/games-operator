@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -150,8 +151,17 @@ type Config struct {
 	Tolerations  []Toleration
 	ExtraEnv     map[string]string
 
+	// BasePath is the path of PublicURL without a trailing slash ("" at
+	// the root). The UI and API live under it, so the root of the host can
+	// belong to moonlight-web.
+	BasePath string
+	// BrowserUpstream is the in-cluster URL of moonlight-web. When set the
+	// hub reverse-proxies everything outside BasePath to it, so the browser
+	// client shares the hub's host name (and its Ingress, TLS and tunnel).
+	BrowserUpstream *url.URL
 	// BrowserURL is the public URL of the moonlight-web instance that
-	// streams into the browser; empty hides "Play in browser".
+	// streams into the browser; empty hides "Play in browser". Derived from
+	// PublicURL when BrowserUpstream is set, otherwise BROWSER_URL.
 	BrowserURL string
 
 	CookieSecret      []byte
@@ -294,6 +304,24 @@ func load(get lookup) (*Config, error) {
 			errs = append(errs, fmt.Errorf("%sPUBLIC_URL must be an absolute http(s) URL", Prefix))
 		} else {
 			c.PublicURL = u
+			c.BasePath = strings.TrimSuffix(path.Clean("/"+u.Path), "/")
+			if c.BasePath == "/" {
+				c.BasePath = ""
+			}
+		}
+	}
+	if raw := str("BROWSER_UPSTREAM", ""); raw != "" {
+		u, err := url.Parse(raw)
+		switch {
+		case err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https"):
+			errs = append(errs, fmt.Errorf("%sBROWSER_UPSTREAM must be an absolute http(s) URL", Prefix))
+		case c.PublicURL != nil && c.BasePath == "":
+			errs = append(errs, fmt.Errorf("%sPUBLIC_URL needs a path such as /hub when BROWSER_UPSTREAM is set: moonlight-web is served at the root", Prefix))
+		default:
+			c.BrowserUpstream = u
+			if c.PublicURL != nil {
+				c.BrowserURL = c.PublicURL.Scheme + "://" + c.PublicURL.Host + "/"
+			}
 		}
 	}
 	if raw := required("COOKIE_SECRET"); raw != "" {

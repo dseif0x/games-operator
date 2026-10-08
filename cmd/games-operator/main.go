@@ -21,6 +21,7 @@ import (
 	"github.com/dseif0x/games-operator/internal/api"
 	"github.com/dseif0x/games-operator/internal/apps"
 	"github.com/dseif0x/games-operator/internal/auth"
+	"github.com/dseif0x/games-operator/internal/browser"
 	"github.com/dseif0x/games-operator/internal/config"
 	"github.com/dseif0x/games-operator/internal/k8s"
 	"github.com/dseif0x/games-operator/internal/moonlight"
@@ -116,10 +117,6 @@ func run() error {
 		return err
 	}
 	inf := k8s.NewInformers(cs, cfg.Namespace, 10*time.Minute)
-	if err := inf.Start(ctx); err != nil {
-		return err
-	}
-	log.Info("informers synced")
 
 	// Metrics.
 	reg := prometheus.NewRegistry()
@@ -160,20 +157,20 @@ func run() error {
 			defer cancel()
 			return inf.Synced() && st.Ping(pctx) == nil
 		},
-		UI:      ui.Handler(),
+		UI:      ui.Handler(cfg.BasePath),
 		Metrics: promhttp.HandlerFor(reg, promhttp.HandlerOpts{}),
 		Log:     log,
 	}
+	if cfg.BrowserUpstream != nil {
+		srv.Browser = browser.New(cfg.BrowserUpstream, log)
+		log.Info("proxying moonlight-web", "upstream", cfg.BrowserUpstream.String(), "base_path", cfg.BasePath)
+	}
 
-	go rec.Run(ctx)
-	go svc.RunPoller(ctx, cfg.StatusPollEvery)
+	// Listen first: /healthz answers while the informers sync, /readyz
+	// stays 503 until they have. A missing RBAC rule then shows up as a
+	// pod that is up but not ready, with the reason in the log, instead of
+	// a restart loop.
 	errc := make(chan error, 2)
-	go func() {
-		if err := ml.Run(ctx); err != nil {
-			errc <- fmt.Errorf("moonlight: %w", err)
-		}
-	}()
-
 	httpSrv := &http.Server{
 		Addr:              cfg.ListenAddr,
 		Handler:           srv.Handler(),
@@ -184,6 +181,18 @@ func run() error {
 		log.Info("listening", "addr", cfg.ListenAddr)
 		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errc <- err
+		}
+	}()
+
+	if err := waitForInformers(ctx, inf, log); err != nil {
+		return err
+	}
+
+	go rec.Run(ctx)
+	go svc.RunPoller(ctx, cfg.StatusPollEvery)
+	go func() {
+		if err := ml.Run(ctx); err != nil {
+			errc <- fmt.Errorf("moonlight: %w", err)
 		}
 	}()
 
@@ -203,4 +212,24 @@ func run() error {
 func hostUniqueID(cfg *config.Config) string {
 	h := auth.HashToken("games-operator:" + cfg.PublicURL.Host)
 	return h[0:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:32]
+}
+
+// waitForInformers starts the informers and blocks until their caches are
+// in sync, retrying for as long as the process runs. The usual cause of a
+// long wait is a missing RBAC rule; client-go logs the forbidden error.
+func waitForInformers(ctx context.Context, inf *k8s.Informers, log *slog.Logger) error {
+	inf.Start(ctx)
+	for {
+		sctx, cancel := context.WithTimeout(ctx, time.Minute)
+		err := inf.WaitForSync(sctx)
+		cancel()
+		if err == nil {
+			log.Info("informers synced")
+			return nil
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		log.Warn("informers not synced yet; check the hub's RBAC", "err", err)
+	}
 }

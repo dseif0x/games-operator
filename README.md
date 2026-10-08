@@ -7,7 +7,7 @@ It is the sibling of [agents-operator](https://github.com/dseif0x/agents-operato
 ```
 Moonlight client ──47989/47984──▶ hub (Moonlight protocol: pair, applist, launch)
                  ──RTSP/RTP/ENet─▶ app pod: app + wolf + pulseaudio + wolf-bridge
-browser ─▶ moonlight-web ─▶ (same path, re-packetised onto WebRTC)
+browser ─▶ hub (reverse proxy) ─▶ moonlight-web ─▶ (same path, re-packetised onto WebRTC or a WebSocket)
 hub ──▶ Postgres (users, apps, pairings)   hub ──▶ Kubernetes (pods, PVCs, Services)
 ```
 
@@ -34,7 +34,7 @@ The NOTES print how to read the generated admin password. Then:
 2. In Moonlight add the LoadBalancer IP as a host and press pair; type the PIN on the UI's **Pair** page. The client is bound to your account and sees your apps.
 3. Launch the app in Moonlight. The pod is created (your GPU node wakes up if it is asleep), Wolf starts the stream, Moonlight connects. Quit the app in Moonlight, or wait `apps.idleStopAfter`, and the pod is deleted; the home volume stays.
 
-For the browser: enable `browser.enabled`, open moonlight-web, add the same host, and give it a *Wolf* backend with the API URL and token from the UI's **Account** page — it then pairs on its own.
+For the browser: enable `browser.enabled` and give `publicUrl` a path (`https://games.example.com/hub`). moonlight-web then answers at the root of the same host through the hub, so one Ingress, certificate or tunnel covers both. Open it, add the same Moonlight host, and give it a *Wolf* backend with the API URL and token from the UI's **Account** page; it pairs on its own and launches apps from its list.
 
 ## Requirements
 

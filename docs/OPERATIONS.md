@@ -22,7 +22,8 @@ spec:
     apps:
       storageClass: local-path          # the GPU node's own disk
       nodeSelector: { kubernetes.io/hostname: gpu-node }
-    browser: { enabled: true, url: https://play.homelab.example.com, nodeSelector: { kubernetes.io/hostname: gpu-node } }
+    publicUrl: https://games.homelab.example.com/hub   # the hub below /hub, moonlight-web at the root
+    browser: { enabled: true }
     postgresql: { enabled: false }
     database: { existingSecret: games-operator-db-app, existingSecretKey: uri }   # CloudNativePG
 ```
@@ -53,14 +54,18 @@ kubectl apply -f https://raw.githubusercontent.com/dseif0x/games-operator/main/h
 
 ## moonlight-web
 
-`browser.enabled: true` deploys `ghcr.io/linckosz/moonlight-web` with `hostNetwork` (WebRTC media needs reachable UDP ports; through a bridge it falls back to TCP). First run, once:
+`browser.enabled: true` deploys `ghcr.io/linckosz/moonlight-web` and makes the hub reverse-proxy it: the root of `publicUrl`'s host is moonlight-web, the hub's UI and API live under the path in `publicUrl` (say `/hub`). One host name, one Ingress, one certificate, and it works through a Cloudflare tunnel or across a firewall, because the stream falls back to moonlight-web's WebSocket transport when WebRTC's UDP cannot reach the browser. `browser.hostNetwork: true` additionally exposes the UDP media ports on the node for browsers on the same LAN.
+
+First run, once:
 
 ```sh
 kubectl -n games exec deploy/games-operator-moonlight-web -- moonlightweb --new-pin        # a PIN per device to log in
-kubectl -n games exec -it deploy/games-operator-moonlight-web -- moonlightweb --set-admin-password
+kubectl -n games exec -i deploy/games-operator-moonlight-web -- moonlightweb --set-admin-password   # reads the password twice from stdin
 ```
 
-Open its URL, add the Moonlight LoadBalancer IP as a host, then host card → ⋯ → **Backend**: type *Wolf*, API URL and token from the hub's Account page. From then on moonlight-web pairs and streams your apps in the browser. Expose it with your usual Ingress or directly on the node's port (`browser.httpsPort`).
+Open the host's root, enter the PIN, add the Moonlight LoadBalancer IP as a host, then host card → ⋯ → **Backend**: type *Wolf*, API URL and token from the hub's Account page. From then on moonlight-web pairs and streams your apps in the browser. Apps start when moonlight-web (or any Moonlight client) launches them; the hub's "Browser" button only opens moonlight-web.
+
+moonlight-web sees every browser behind the hub's address, so its per-peer flood protection counts all users together.
 
 ## GPU node that sleeps
 

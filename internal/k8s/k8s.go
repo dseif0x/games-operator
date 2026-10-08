@@ -124,9 +124,15 @@ func (i *Informers) OnChange(fn func(appID string)) {
 	i.handlers = append(i.handlers, fn)
 }
 
-// Start runs the informers until ctx is done and waits for the first sync.
-func (i *Informers) Start(ctx context.Context) error {
+// Start runs the informers until ctx is done. It returns at once; see
+// WaitForSync.
+func (i *Informers) Start(ctx context.Context) {
 	i.factory.Start(ctx.Done())
+}
+
+// WaitForSync blocks until every informer has completed its first list,
+// or ctx ends, in which case it reports which one is still missing.
+func (i *Informers) WaitForSync(ctx context.Context) error {
 	for typ, ok := range i.factory.WaitForCacheSync(ctx.Done()) {
 		if !ok {
 			return fmt.Errorf("informer for %v failed to sync", typ)

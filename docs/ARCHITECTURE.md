@@ -4,7 +4,7 @@
 
 ```
                 ┌──────────────────────── hub (1 replica) ────────────────────────┐
-browser ──HTTPS─▶ web UI + REST API (:8080)                                         │
+browser ──HTTPS─▶ web UI + REST API (:8080, under PUBLIC_URL's path; the rest of the host proxies to moonlight-web)                                         │
 Moonlight ─TCP──▶ Moonlight HTTP (:47989) / HTTPS + client cert (:47984)            │
 moonlight-web ──▶ /wolf/api/v1/pair/* (bearer token)                                │
                 │ reconciler ◀── informers (pods, pvcs, secrets, services)          │

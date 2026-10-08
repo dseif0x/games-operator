@@ -113,8 +113,16 @@ spec:
               value: {{ .Values.apps.extraEnv | toJson | quote }}
             - name: GAMES_OPERATOR_IDLE_STOP_AFTER
               value: {{ .Values.apps.idleStopAfter | quote }}
+            {{- if .Values.browser.enabled }}
+            {{- if not (regexMatch "^https?://[^/]+/.+" .Values.publicUrl) }}
+            {{- fail "browser.enabled needs publicUrl with a path, e.g. https://games.example.com/hub: moonlight-web is served at the root of the host" }}
+            {{- end }}
+            - name: GAMES_OPERATOR_BROWSER_UPSTREAM
+              value: "https://{{ include "games-operator.fullname" . }}-moonlight-web:{{ .Values.browser.httpsPort }}"
+            {{- else if .Values.browser.externalUrl }}
             - name: GAMES_OPERATOR_BROWSER_URL
-              value: {{ .Values.browser.url | quote }}
+              value: {{ .Values.browser.externalUrl | quote }}
+            {{- end }}
             - name: GAMES_OPERATOR_ALLOWED_HOSTS
               value: {{ join "," .Values.allowedHosts | quote }}
             - name: GAMES_OPERATOR_LOG_LEVEL

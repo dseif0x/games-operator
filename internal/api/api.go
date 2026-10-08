@@ -32,6 +32,8 @@ type Server struct {
 	Limiter *auth.RateLimiter
 	Ready   func() bool
 	UI      http.Handler
+	// Browser serves everything outside Cfg.BasePath (moonlight-web).
+	Browser http.Handler
 	Metrics http.Handler
 	Log     *slog.Logger
 }
@@ -45,10 +47,34 @@ func principal(r *http.Request) *auth.Principal {
 	return p
 }
 
-// Handler builds the full router.
+// Handler builds the full router. The hub's routes live under
+// Cfg.BasePath; probes and metrics stay at the root for the kubelet and
+// Prometheus. With a prefix, the rest of the host goes to Browser
+// (moonlight-web) or redirects to the UI.
 func (s *Server) Handler() http.Handler {
-	mux := http.NewServeMux()
+	hub := s.recover(s.securityHeaders(s.hubMux()))
+	base := s.Cfg.BasePath
+	root := http.NewServeMux()
+	s.probes(root)
+	if base == "" {
+		root.Handle("/", hub)
+	} else {
+		root.Handle(base+"/", http.StripPrefix(base, hub))
+		root.HandleFunc(base, func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, base+"/", http.StatusTemporaryRedirect)
+		})
+		if s.Browser != nil {
+			root.Handle("/", s.recover(s.Browser))
+		} else {
+			root.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+				http.Redirect(w, r, base+"/", http.StatusTemporaryRedirect)
+			})
+		}
+	}
+	return s.recover(s.hostAllowlist(s.logging(root)))
+}
 
+func (s *Server) probes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { writeText(w, http.StatusOK, "ok") })
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {
 		if s.Ready != nil && !s.Ready() {
@@ -60,6 +86,12 @@ func (s *Server) Handler() http.Handler {
 	if s.Metrics != nil {
 		mux.Handle("GET /metrics", s.Metrics)
 	}
+}
+
+// hubMux is the hub's own API and UI, addressed relative to the base path.
+func (s *Server) hubMux() *http.ServeMux {
+	mux := http.NewServeMux()
+	s.probes(mux)
 
 	// Public auth routes.
 	mux.HandleFunc("POST /api/v1/auth/login", s.login)
@@ -96,7 +128,7 @@ func (s *Server) Handler() http.Handler {
 	if s.UI != nil {
 		mux.Handle("/", s.UI)
 	}
-	return s.recover(s.hostAllowlist(s.logging(s.securityHeaders(mux))))
+	return mux
 }
 
 // ---- middleware ----

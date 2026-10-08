@@ -63,15 +63,17 @@ export function AppList(props: { user: User; onLogout: () => void }) {
       {error && <div class="error">{error}</div>}
       {defaults && (
         <p class="muted hint">
-          Add <code>{defaults.moonlight_host || "the LoadBalancer IP"}</code> as a host in Moonlight, then <Link href="/pair">pair it</Link>.
+          Apps start when a Moonlight client launches them. Add <code>{defaults.moonlight_host || "the LoadBalancer IP"}</code> as a host in
+          Moonlight, <Link href="/pair">pair it</Link>, and pick the app there.
           {defaults.browser_url ? (
             <>
               {" "}
-              Or play in the browser via{" "}
+              In the browser,{" "}
               <a href={defaults.browser_url} target="_blank" rel="noopener">
                 moonlight-web
-              </a>
-              .
+              </a>{" "}
+              is the client: add the same host once (give it a <em>Wolf</em> backend from <Link href="/account">Account</Link> so it pairs by itself),
+              then launch apps from its list.
             </>
           ) : null}
         </p>
@@ -115,7 +117,7 @@ function AppCard({ a, browserUrl, onStop }: { a: App; browserUrl: string; onStop
       </div>
       <div class="row">
         {browserUrl && !active && (
-          <a class="btn small" href={browserUrl} target="_blank" rel="noopener" title="Open moonlight-web and pick this app">
+          <a class="btn small" href={browserUrl} target="_blank" rel="noopener" title="Opens moonlight-web; launch the app from its list">
             ▶ Browser
           </a>
         )}

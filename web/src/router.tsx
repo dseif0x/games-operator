@@ -8,16 +8,35 @@ export interface Route {
 
 const listeners = new Set<() => void>();
 
+/** Where the app is mounted, from <base href> ("" at the root, "/hub" below it). */
+export const BASE = (() => {
+  try {
+    return new URL(document.baseURI).pathname.replace(/\/$/, "");
+  } catch {
+    return "";
+  }
+})();
+
+/** Absolute URL path for an app-relative path such as "/apps/1". */
+export function href(path: string): string {
+  return BASE + path;
+}
+
+function current(): string {
+  const p = location.pathname;
+  return BASE && p.startsWith(BASE) ? p.slice(BASE.length) || "/" : p;
+}
+
 export function navigate(path: string, replace = false) {
-  if (replace) history.replaceState(null, "", path);
-  else history.pushState(null, "", path);
+  if (replace) history.replaceState(null, "", href(path));
+  else history.pushState(null, "", href(path));
   listeners.forEach((l) => l());
 }
 
 export function useRoute(): Route {
-  const [path, setPath] = useState(location.pathname);
+  const [path, setPath] = useState(current());
   useEffect(() => {
-    const update = () => setPath(location.pathname);
+    const update = () => setPath(current());
     listeners.add(update);
     addEventListener("popstate", update);
     return () => {
@@ -48,7 +67,7 @@ export function Link(props: { href: string; class?: string; children: preact.Com
     navigate(props.href);
   };
   return (
-    <a href={props.href} class={props.class} title={props.title} onClick={onClick}>
+    <a href={href(props.href)} class={props.class} title={props.title} onClick={onClick}>
       {props.children}
     </a>
   );

@@ -11,6 +11,12 @@ Password: generated. Read it with
   kubectl -n {{ .Release.Namespace }} get secret {{ include "games-operator.authSecretName" . }} -o jsonpath='{.data.adminPassword}' | base64 -d; echo
 {{- end }}
 
+{{- if .Values.browser.enabled }}
+Browser: {{ regexReplaceAll "^(https?://[^/]+).*$" .Values.publicUrl "$1" }}/ (moonlight-web, proxied by the hub). First run, once:
+  kubectl -n {{ .Release.Namespace }} exec deploy/{{ include "games-operator.fullname" . }}-moonlight-web -- moonlightweb --new-pin
+  kubectl -n {{ .Release.Namespace }} exec -i deploy/{{ include "games-operator.fullname" . }}-moonlight-web -- moonlightweb --set-admin-password
+{{- end }}
+
 Moonlight host: the LoadBalancer IP of
   kubectl -n {{ .Release.Namespace }} get svc {{ include "games-operator.fullname" . }}-moonlight
 Add it in Moonlight, press pair, type the PIN on the "Pair" page of the web UI.

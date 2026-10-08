@@ -5,11 +5,13 @@
 package ui
 
 import (
+	"bytes"
 	"embed"
 	"io/fs"
 	"net/http"
 	"path"
 	"strings"
+	"time"
 )
 
 //go:embed all:dist
@@ -20,13 +22,28 @@ const Built = true
 
 // Handler serves the embedded SPA. Hashed assets get long cache headers,
 // everything else falls back to index.html so client-side routes work.
-func Handler() http.Handler {
+// basePath is where the SPA is mounted ("" at the root, "/hub" below it);
+// index.html carries it in <base href>, from which the app derives every
+// link and API URL.
+func Handler(basePath string) http.Handler {
 	sub, err := fs.Sub(dist, "dist")
 	if err != nil {
 		panic(err)
 	}
+	index, err := fs.ReadFile(sub, "index.html")
+	if err != nil {
+		panic(err)
+	}
+	// Vite keeps the tag as written in web/index.html, give or take the
+	// self-closing slash, so match the opening part only.
+	index = bytes.Replace(index, []byte(`<base href="/"`), []byte(`<base href="`+basePath+`/"`), 1)
 	files := http.FS(sub)
 	fileServer := http.FileServer(files)
+	serveIndex := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-cache")
+		http.ServeContent(w, r, "index.html", time.Time{}, bytes.NewReader(index))
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -38,17 +55,18 @@ func Handler() http.Handler {
 		} else {
 			w.Header().Set("Cache-Control", "no-cache")
 		}
-		if f, err := files.Open(p); err == nil {
-			st, serr := f.Stat()
-			_ = f.Close()
-			if serr == nil && !st.IsDir() {
-				r.URL.Path = p
-				fileServer.ServeHTTP(w, r)
-				return
+		if p != "/" && p != "/index.html" {
+			if f, err := files.Open(p); err == nil {
+				st, serr := f.Stat()
+				_ = f.Close()
+				if serr == nil && !st.IsDir() {
+					r.URL.Path = p
+					fileServer.ServeHTTP(w, r)
+					return
+				}
 			}
 		}
-		// SPA fallback.
-		r.URL.Path = "/"
-		fileServer.ServeHTTP(w, r)
+		// index.html, and the SPA fallback for client-side routes.
+		serveIndex(w, r)
 	})
 }
