@@ -11,6 +11,7 @@ metadata:
   {{- end }}
 automountServiceAccountToken: true
 {{- end }}
+{{- if .Values.rbac.create }}
 ---
 # Namespace-scoped Role with exactly the verbs the hub needs.
 apiVersion: rbac.authorization.k8s.io/v1
@@ -53,3 +54,4 @@ subjects:
   - kind: ServiceAccount
     name: {{ include "games-operator.serviceAccountName" . }}
     namespace: {{ .Release.Namespace }}
+{{- end }}

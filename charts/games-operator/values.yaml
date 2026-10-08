@@ -204,6 +204,10 @@ extraEnv: []
 # -- Hub log level: debug, info, warn, error
 logLevel: info
 
+rbac:
+  # -- Create the Role and RoleBinding for the hub's ServiceAccount; set false when an operator without RBAC rights installs the chart and the Role is applied separately (see docs/OPERATIONS.md)
+  create: true
+
 serviceAccount:
   # -- Create the ServiceAccount
   create: true

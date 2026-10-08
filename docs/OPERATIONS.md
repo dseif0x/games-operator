@@ -29,6 +29,16 @@ spec:
 
 Label the namespace `pod-security.kubernetes.io/enforce=privileged` (app pods need hostIPC, host device paths and capabilities).
 
+## Installing without RBAC rights
+
+The chart creates a namespace-scoped Role and RoleBinding for the hub. An operator who holds only the `edit` ClusterRole in the namespace cannot create those; install with `--set rbac.create=false` and have a cluster admin apply the two objects once:
+
+```sh
+helm template games-operator charts/games-operator --namespace games-operator \
+  --set postgresql.enabled=false --set database.url=postgres://unused \
+  --show-only templates/rbac.yaml | kubectl apply -f -
+```
+
 ## Networking
 
 - The chart's `-moonlight` Service (47989/47984 TCP) and every per-app Service share one LoadBalancer IP through `metallb.io/allow-shared-ip` / `lbipam.cilium.io/sharing-key`. Set `moonlight.loadBalancerIP` to pin it: that IP is what users add in Moonlight, and the hub needs it before the first Service exists.
