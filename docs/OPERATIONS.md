@@ -67,9 +67,14 @@ Open the host's root, enter the PIN, add the Moonlight LoadBalancer IP as a host
 
 moonlight-web sees every browser behind the hub's address, so its per-peer flood protection counts all users together.
 
-## GPU node that sleeps
+## GPU node that sleeps, and client timeouts
 
-A launch creates a pod requesting `nvidia.com/gpu`; a pending pod is what node auto-provisioners react to. The Moonlight `/launch` call waits up to 10 minutes, Moonlight itself shows "starting" meanwhile. After the stream ends the app is stopped `apps.idleStopAfter` later (default 15 min), the pod disappears and the node can power off.
+A launch creates a pod requesting `nvidia.com/gpu`; a pending pod is what node auto-provisioners react to. Booting a node and pulling the images takes minutes, while Moonlight clients give `/launch` 20 s (moonlight-web) to two minutes (Moonlight Qt) and then send `/cancel`. The hub is built for that:
+
+- `/launch` holds the request until the stream is up or the client goes away. While the app is `starting`, every retry replaces the pending stream keys, so the stream that comes up matches the client that is waiting now.
+- `/cancel` while the app is `starting` is ignored, with an event on the app. Only a running app is quit by `/cancel`.
+- **Start** in the UI (`POST /api/v1/apps/{id}/start`) warms an app up without a client: the pod comes up and the app shows *Ready*. A launch then streams at once. Use it before sitting down to play, or when the node is asleep.
+- After the stream ends, or if no client ever comes, the app is stopped `apps.idleStopAfter` later (default 15 min), the pod disappears and the node can power off.
 
 ## Storage
 

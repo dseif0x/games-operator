@@ -35,10 +35,12 @@ moonlight-web ──▶ /wolf/api/v1/pair/* (bearer token)                      
 | `pairings` | Moonlight client certificates (by SHA-256 fingerprint) bound to a user |
 | `app_events` | per-app event log, pruned to 200 |
 
-An app is **stopped** until a Moonlight client launches it. States:
+An app is **stopped** until a Moonlight client launches it, or a user starts it from the UI to have it warm (running, no stream, reason "ready, waiting for a Moonlight client"). States:
 
 ```
-stopped ─launch→ starting ─stream up→ running ─stop/cancel/idle→ stopping ─objects gone→ stopped
+stopped ─launch/start→ starting ─pod ready (+stream up)→ running ─stop/cancel/idle→ stopping ─objects gone→ stopped
+
+A `/cancel` during `starting` does not stop the app: clients send it when `/launch` outruns their timeout, and the pod is seconds from usable. A retried `/launch` during `starting` replaces the pending stream keys.
                     │                    │
                     └──timeout/error─────┴──→ failed (pod kept for logs; stop or delete clears it)
 any ─delete→ deleting → row deleted

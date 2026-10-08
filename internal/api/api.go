@@ -106,6 +106,7 @@ func (s *Server) hubMux() *http.ServeMux {
 	authed.HandleFunc("GET /api/v1/apps/{id}", s.getApp)
 	authed.HandleFunc("PATCH /api/v1/apps/{id}", s.updateApp)
 	authed.HandleFunc("DELETE /api/v1/apps/{id}", s.deleteApp)
+	authed.HandleFunc("POST /api/v1/apps/{id}/start", s.startApp)
 	authed.HandleFunc("POST /api/v1/apps/{id}/stop", s.stopApp)
 	authed.HandleFunc("GET /api/v1/apps/{id}/events", s.appEventLog)
 	authed.HandleFunc("GET /api/v1/apps/{id}/logs", s.appLogs)
@@ -426,6 +427,16 @@ func (s *Server) updateApp(w http.ResponseWriter, r *http.Request) {
 func (s *Server) deleteApp(w http.ResponseWriter, r *http.Request) {
 	p := principal(r)
 	a, err := s.Apps.Delete(r.Context(), p.User, r.PathValue("id"))
+	if err != nil {
+		s.mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, s.Apps.View(a))
+}
+
+func (s *Server) startApp(w http.ResponseWriter, r *http.Request) {
+	p := principal(r)
+	a, err := s.Apps.Start(r.Context(), p.User, r.PathValue("id"))
 	if err != nil {
 		s.mapErr(w, err)
 		return

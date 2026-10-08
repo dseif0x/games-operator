@@ -43,6 +43,7 @@ export interface App {
   capabilities: string[];
   state: AppState;
   state_reason: string;
+  streaming: boolean;
   slot: number;
   stream_url: string;
   stream?: StreamInfo;
@@ -157,6 +158,7 @@ export const api = {
   createApp: (req: CreateAppRequest) => request<App>("POST", "/apps", req),
   updateApp: (id: string, req: CreateAppRequest) => request<App>("PATCH", `/apps/${id}`, req),
   deleteApp: (id: string) => request<App>("DELETE", `/apps/${id}`),
+  startApp: (id: string) => request<App>("POST", `/apps/${id}/start`),
   stopApp: (id: string) => request<App>("POST", `/apps/${id}/stop`),
   appEvents: (id: string) => request<{ events: AppEvent[] }>("GET", `/apps/${id}/events`),
   appLogs: async (id: string, container: string) => {

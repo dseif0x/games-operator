@@ -318,7 +318,17 @@ func (s *Server) resume(w http.ResponseWriter, r *http.Request) { s.launchOrResu
 
 func (s *Server) launchOrResume(w http.ResponseWriter, r *http.Request, resume bool) {
 	q := r.URL.Query()
-	app, err := s.appByID(r)
+	var app *store.App
+	var err error
+	if resume && q.Get("appid") == "" {
+		// /resume names no app: it continues whatever runs for this user.
+		app, err = s.launcher.Current(r.Context(), userOf(r).ID)
+		if err == nil && app == nil {
+			err = errors.New("nothing to resume")
+		}
+	} else {
+		app, err = s.appByID(r)
+	}
 	if err != nil {
 		writeError(w, s.log, 404, err)
 		return

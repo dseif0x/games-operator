@@ -381,6 +381,9 @@ func (r *Reconciler) timedOut(app *store.App) bool {
 	return r.now().Sub(started) > r.cfg.StartingTimeout
 }
 
+// WarmReason is the state reason of a running app that has no client yet.
+const WarmReason = "ready, waiting for a Moonlight client"
+
 // ensureStream registers the Moonlight stream with Wolf once the pod is
 // ready and the Service has its address, then marks the app running.
 func (r *Reconciler) ensureStream(ctx context.Context, app *store.App, o observed) error {
@@ -405,7 +408,12 @@ func (r *Reconciler) ensureStream(ctx context.Context, app *store.App, o observe
 		return nil
 	}
 	if app.Stream == nil {
-		return r.fail(ctx, app, "no stream parameters")
+		// Started without a client: the pod is up and Wolf waits. A launch
+		// later sets the stream parameters and lands here again.
+		if app.State != store.StateRunning || app.StateReason != WarmReason {
+			return r.setState(ctx, app, store.StateRunning, WarmReason)
+		}
+		return nil
 	}
 	client, err := r.wolfClient(o)
 	if err != nil {

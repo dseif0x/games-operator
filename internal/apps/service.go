@@ -96,11 +96,14 @@ type View struct {
 	StateReason  string            `json:"state_reason"`
 	Slot         int               `json:"slot"`
 	StreamURL    string            `json:"stream_url"`
-	Stream       *StreamView       `json:"stream,omitempty"`
-	PodName      string            `json:"pod_name"`
-	CreatedAt    time.Time         `json:"created_at"`
-	UpdatedAt    time.Time         `json:"updated_at"`
-	LastActiveAt *time.Time        `json:"last_active_at"`
+	// Streaming is true once Wolf has a session for a client; a running
+	// app without one is warm and waiting for a Moonlight launch.
+	Streaming    bool        `json:"streaming"`
+	Stream       *StreamView `json:"stream,omitempty"`
+	PodName      string      `json:"pod_name"`
+	CreatedAt    time.Time   `json:"created_at"`
+	UpdatedAt    time.Time   `json:"updated_at"`
+	LastActiveAt *time.Time  `json:"last_active_at"`
 }
 
 // StreamView is the non-secret part of the current stream.
@@ -119,7 +122,8 @@ func (s *Service) View(a *store.App) View {
 		ID: a.ID, MoonlightID: a.MoonlightID, Name: a.Name, Preset: a.Preset, Image: a.Image, IconURL: a.IconURL, HDR: a.HDR,
 		Command: a.Command, PVCSize: a.PVCSize, StorageClass: a.StorageClass, Resources: a.Resources, Env: a.Env, HostIPC: a.HostIPC,
 		Capabilities: a.Capabilities, State: a.State, StateReason: a.StateReason, Slot: a.Slot, StreamURL: a.StreamURL,
-		PodName: reconcile.ObjectName(a.ID), CreatedAt: a.CreatedAt, UpdatedAt: a.UpdatedAt, LastActiveAt: a.LastActiveAt,
+		Streaming: a.State == store.StateRunning && a.WolfSessionID != "" && a.Stream != nil,
+		PodName:   reconcile.ObjectName(a.ID), CreatedAt: a.CreatedAt, UpdatedAt: a.UpdatedAt, LastActiveAt: a.LastActiveAt,
 	}
 	if v.Env == nil {
 		v.Env = map[string]string{}
@@ -437,7 +441,14 @@ func (s *Service) Launch(ctx context.Context, user *store.User, pairing *store.P
 		_ = s.Store.Events().Add(ctx, a.ID, "moonlight", "stream re-keyed for "+stream.ClientIP)
 		s.Orch.Notify(a.ID)
 	case store.StateStarting:
-		// Another launch is in flight; just wait for it.
+		// Still coming up (a node waking, an image pulling). Clients give up
+		// on /launch long before that and try again later, so take this
+		// attempt's keys: the stream that eventually comes up must match the
+		// client that is waiting now, not the one that went away.
+		if _, err := s.Store.Apps().SetStream(ctx, a.ID, &stream); err != nil {
+			return "", err
+		}
+		_ = s.Store.Events().Add(ctx, a.ID, "moonlight", "launch retried by "+stream.ClientIP+"; keys updated, still starting")
 	case store.StateStopped, store.StateFailed:
 		// One stream per user: stop whatever else runs.
 		list, err := s.Store.Apps().List(ctx, user.ID)
@@ -466,6 +477,47 @@ func (s *Service) Launch(ctx context.Context, user *store.User, pairing *store.P
 		return "", fmt.Errorf("app is %s", a.State)
 	}
 	return s.waitForStream(ctx, a.ID)
+}
+
+// Start warms an app up without a client: the pod comes up and Wolf waits,
+// so a later /launch streams at once instead of running into the client's
+// timeout. The idle stop reclaims it if no client follows. One app per
+// user runs at a time, as with Launch.
+func (s *Service) Start(ctx context.Context, user *store.User, id string) (*store.App, error) {
+	a, err := s.Get(ctx, user.ID, id)
+	if err != nil {
+		return nil, err
+	}
+	switch a.State {
+	case store.StateStopped, store.StateFailed:
+	case store.StateStarting, store.StateRunning:
+		return a, nil
+	default:
+		return nil, ErrInvalidTransition
+	}
+	list, err := s.Store.Apps().List(ctx, user.ID)
+	if err != nil {
+		return nil, err
+	}
+	for _, other := range list {
+		if other.ID != a.ID && (other.State == store.StateRunning || other.State == store.StateStarting) {
+			if _, err := s.stop(ctx, other, "user"); err != nil && !errors.Is(err, ErrInvalidTransition) {
+				return nil, err
+			}
+		}
+	}
+	slot, err := s.freeSlot(ctx)
+	if err != nil {
+		return nil, err
+	}
+	started, err := s.Store.Apps().Launch(ctx, a.ID, nil, slot)
+	if err != nil {
+		return nil, err
+	}
+	_ = s.Store.Events().Add(ctx, a.ID, "user", fmt.Sprintf("started without a client (slot %d); waiting for Moonlight", slot))
+	s.Orch.Notify(a.ID)
+	s.publish(ctx, started)
+	return started, nil
 }
 
 // waitForStream polls the row until the reconciler has registered the
@@ -523,6 +575,15 @@ func (s *Service) Cancel(ctx context.Context, user *store.User) error {
 	cur, err := s.Current(ctx, user.ID)
 	if err != nil || cur == nil {
 		return err
+	}
+	// A client that gave up waiting for /launch sends /cancel right after.
+	// Stopping now would throw away the pod (and the node that just woke
+	// up) moments before it is usable, so a starting app keeps starting;
+	// the idle stop reclaims it if nobody comes back. Quitting a running
+	// app is what /cancel means otherwise, and that still stops it.
+	if cur.State == store.StateStarting {
+		_ = s.Store.Events().Add(ctx, cur.ID, "moonlight", "cancel while starting ignored; the app keeps starting")
+		return nil
 	}
 	_, err = s.stop(ctx, cur, "moonlight")
 	if errors.Is(err, ErrInvalidTransition) {

@@ -22,6 +22,8 @@ type fakeOrch struct {
 	mu       sync.Mutex
 	notified []string
 	status   bridge.Status
+	// slow leaves starting apps starting, like a node that is still booting.
+	slow bool
 }
 
 func (f *fakeOrch) Notify(id string) {
@@ -35,11 +37,22 @@ func (f *fakeOrch) Notify(id string) {
 	}
 	switch a.State {
 	case store.StateStarting:
+		if f.slow {
+			return
+		}
+		if a.Stream == nil {
+			_, _ = f.st.Apps().SetState(ctx, id, store.StateRunning, "ready, waiting for a Moonlight client")
+			return
+		}
 		_, _ = f.st.Apps().SetRuntime(ctx, id, "wolf-1", "rtsp://10.13.254.9:48100")
 		_, _ = f.st.Apps().SetState(ctx, id, store.StateRunning, "")
 	case store.StateRunning:
-		if a.WolfSessionID == "" {
-			_, _ = f.st.Apps().SetRuntime(ctx, id, "wolf-2", a.StreamURL)
+		if a.WolfSessionID == "" && a.Stream != nil {
+			url := a.StreamURL
+			if url == "" { // first stream of a warm app
+				url = "rtsp://10.13.254.9:48100"
+			}
+			_, _ = f.st.Apps().SetRuntime(ctx, id, "wolf-2", url)
 		}
 	case store.StateStopping:
 		_, _ = f.st.Apps().ClearRuntime(ctx, id)
@@ -211,5 +224,81 @@ func TestSlotsExhausted(t *testing.T) {
 	}
 	if _, err := s.Launch(ctx, other, &store.Pairing{ID: "2", UserID: other.ID}, b.MoonlightID, store.Stream{Width: 1, Height: 1, FPS: 1}, false); !errors.Is(err, ErrNoSlot) {
 		t.Fatalf("expected ErrNoSlot, got %v", err)
+	}
+}
+
+func TestLaunchWhileStartingKeepsPod(t *testing.T) {
+	s, u, orch := newService(t)
+	ctx := context.Background()
+	a, _ := s.Create(ctx, u, CreateRequest{Name: "Steam", Preset: "steam"})
+	pairing := &store.Pairing{ID: "fp", UserID: u.ID, Name: "phone"}
+	first := store.Stream{ClientIP: "10.0.0.5", AESKey: "k1", AESIV: "iv1", Width: 1920, Height: 1080, FPS: 60}
+	orch.slow = true
+
+	// The client gives up before the pod is up.
+	cctx, cancel := context.WithTimeout(ctx, 20*time.Millisecond)
+	_, err := s.Launch(cctx, u, pairing, a.MoonlightID, first, false)
+	cancel()
+	if err == nil {
+		t.Fatal("expected a timeout")
+	}
+	// ... and sends /cancel, which must not throw the starting pod away.
+	if err := s.Cancel(ctx, u); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.Get(ctx, u.ID, a.ID); got.State != store.StateStarting {
+		t.Fatalf("cancel while starting must keep the app starting: %s", got.State)
+	}
+	// A retry with new keys updates the pending stream; the stream that
+	// comes up must match the client that waits now.
+	second := store.Stream{ClientIP: "10.0.0.5", AESKey: "k2", AESIV: "iv2", Width: 1280, Height: 720, FPS: 60}
+	cctx, cancel = context.WithTimeout(ctx, 20*time.Millisecond)
+	_, _ = s.Launch(cctx, u, pairing, a.MoonlightID, second, false)
+	cancel()
+	if got, _ := s.Get(ctx, u.ID, a.ID); got.Stream == nil || got.Stream.AESKey != "k2" || got.Slot != 0 {
+		t.Fatalf("retry must re-key without a new slot: %+v", got.Stream)
+	}
+	// The pod comes up; the next launch streams at once.
+	orch.slow = false
+	orch.Notify(a.ID)
+	url, err := s.Launch(ctx, u, pairing, a.MoonlightID, second, false)
+	if err != nil || url == "" {
+		t.Fatalf("launch after warm-up: %v %q", err, url)
+	}
+	// Cancel on a running app still quits it.
+	if err := s.Cancel(ctx, u); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.Get(ctx, u.ID, a.ID); got.State != store.StateStopped {
+		t.Fatalf("cancel while running: %s", got.State)
+	}
+}
+
+func TestStartWarm(t *testing.T) {
+	s, u, _ := newService(t)
+	ctx := context.Background()
+	a, _ := s.Create(ctx, u, CreateRequest{Name: "Steam", Preset: "steam"})
+	started, err := s.Start(ctx, u, a.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if started.Stream != nil || started.Slot != 0 {
+		t.Fatalf("warm start: %+v", started)
+	}
+	got, _ := s.Get(ctx, u.ID, a.ID)
+	if got.State != store.StateRunning || s.View(got).Streaming {
+		t.Fatalf("warm app must be running but not streaming: %s %v", got.State, s.View(got).Streaming)
+	}
+	// Starting again is a no-op; a launch then streams at once.
+	if again, err := s.Start(ctx, u, a.ID); err != nil || again.State != store.StateRunning {
+		t.Fatalf("start twice: %v %+v", err, again)
+	}
+	pairing := &store.Pairing{ID: "fp", UserID: u.ID, Name: "phone"}
+	stream := store.Stream{ClientIP: "10.0.0.5", AESKey: "k", AESIV: "iv", Width: 1920, Height: 1080, FPS: 60}
+	if url, err := s.Launch(ctx, u, pairing, a.MoonlightID, stream, false); err != nil || url == "" {
+		t.Fatalf("launch on warm app: %v %q", err, url)
+	}
+	if got, _ := s.Get(ctx, u.ID, a.ID); !s.View(got).Streaming {
+		t.Fatal("launch must make the warm app stream")
 	}
 }

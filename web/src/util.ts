@@ -12,7 +12,8 @@ export function timeAgo(iso: string | null | undefined): string {
   return `${Math.round(h / 24)}d ago`;
 }
 
-export function stateLabel(state: string): string {
+export function stateLabel(state: string, streaming?: boolean): string {
+  if (state === "running") return streaming ? "Streaming" : "Ready";
   return state.charAt(0).toUpperCase() + state.slice(1);
 }
 

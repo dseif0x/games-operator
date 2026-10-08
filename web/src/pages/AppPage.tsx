@@ -61,10 +61,10 @@ export function AppPage(props: { id: string; user: User; onLogout: () => void })
         <div style="min-width:0;flex:1">
           <h2 style="margin:0">{app.name}</h2>
           <div class="sub">
-            <span class={`dot ${app.state}`} /> {stateLabel(app.state)}
+            <span class={`dot ${app.state}`} /> {stateLabel(app.state, app.streaming)}
             {app.state_reason ? ` · ${app.state_reason}` : ""} · {app.preset} · {app.image}
           </div>
-          {app.stream && (
+          {app.streaming && app.stream && (
             <div class="sub">
               {app.stream.width}×{app.stream.height}@{app.stream.fps} · client {app.stream.client_name || app.stream.client_ip} · since{" "}
               {timeAgo(app.stream.started_at)}
@@ -73,6 +73,11 @@ export function AppPage(props: { id: string; user: User; onLogout: () => void })
           )}
         </div>
         <div class="row">
+          {!active && (
+            <button class="btn primary" onClick={() => act(() => api.startApp(app.id))} title="Start the pod now so a Moonlight launch streams at once">
+              Start
+            </button>
+          )}
           {active && (
             <button class="btn danger" onClick={() => act(() => api.stopApp(app.id))}>
               Stop

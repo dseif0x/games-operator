@@ -10,6 +10,12 @@ export function AppList(props: { user: User; onLogout: () => void }) {
   const [error, setError] = useState("");
   const [, tick] = useState(0);
 
+  const startApp = (a: App) =>
+    api
+      .startApp(a.id)
+      .then(load)
+      .catch((e) => setError(String(e)));
+
   const load = () =>
     api
       .apps()
@@ -87,7 +93,7 @@ export function AppList(props: { user: User; onLogout: () => void }) {
       ) : (
         <div class="apps">
           {apps.map((a) => (
-            <AppCard key={a.id} a={a} browserUrl={defaults?.browser_url || ""} onStop={() => stopApp(a)} />
+            <AppCard key={a.id} a={a} browserUrl={defaults?.browser_url || ""} onStart={() => startApp(a)} onStop={() => stopApp(a)} />
           ))}
         </div>
       )}
@@ -95,7 +101,7 @@ export function AppList(props: { user: User; onLogout: () => void }) {
   );
 }
 
-function AppCard({ a, browserUrl, onStop }: { a: App; browserUrl: string; onStop: () => void }) {
+function AppCard({ a, browserUrl, onStart, onStop }: { a: App; browserUrl: string; onStart: () => void; onStop: () => void }) {
   const active = a.state === "running" || a.state === "starting";
   return (
     <div class="card app-card">
@@ -105,20 +111,25 @@ function AppCard({ a, browserUrl, onStop }: { a: App; browserUrl: string; onStop
       <div style="min-width:0">
         <div class="title">
           <Link href={`/apps/${a.id}`}>{a.name}</Link>
-          <span class={`dot ${a.state}`} title={stateLabel(a.state)} />
-          <span class="badge">{stateLabel(a.state)}</span>
+          <span class={`dot ${a.state}`} title={stateLabel(a.state, a.streaming)} />
+          <span class="badge">{stateLabel(a.state, a.streaming)}</span>
           <span class="badge preset">{a.preset}</span>
         </div>
         <div class="sub">
-          {a.state === "running" && a.stream
+          {a.streaming && a.stream
             ? `streaming ${a.stream.width}×${a.stream.height}@${a.stream.fps} to ${a.stream.client_name || a.stream.client_ip}`
             : a.state_reason || `last active ${timeAgo(a.last_active_at)}`}
         </div>
       </div>
       <div class="row">
-        {browserUrl && !active && (
-          <a class="btn small" href={browserUrl} target="_blank" rel="noopener" title="Opens moonlight-web; launch the app from its list">
-            ▶ Browser
+        {!active && (
+          <button class="btn small primary" onClick={onStart} title="Start the pod now so a Moonlight launch streams at once">
+            Start
+          </button>
+        )}
+        {browserUrl && a.state === "running" && !a.streaming && (
+          <a class="btn small" href={browserUrl} target="_blank" rel="noopener" title="Open moonlight-web and pick this app">
+            ▶ Play in browser
           </a>
         )}
         {active && (
