@@ -226,7 +226,7 @@ func TestPodCarriesWolfConfig(t *testing.T) {
 			t.Fatal("no Secret volume: the config comes from the pod itself")
 		}
 	}
-	if !mounted || !strings.Contains(pod.Spec.InitContainers[0].Command[2], "/podinfo/wolf-config") {
-		t.Fatal("the init container must copy the config from the downward API volume")
+	if !mounted || !strings.Contains(pod.Spec.InitContainers[0].Command[2], "cp /podinfo/wolf-config "+WolfStateDir+"/cfg/config.toml") {
+		t.Fatal("the init container must copy the config from the downward API volume into Wolf's state folder")
 	}
 }

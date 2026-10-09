@@ -114,6 +114,11 @@ const (
 	HomeDir = "/home/retro"
 	// WolfDir holds Wolf's socket and config inside the pod.
 	WolfDir = "/etc/wolf"
+	// WolfStateDir is Wolf's HOST_APPS_STATE_FOLDER. Wolf's startup script
+	// derives its config, key and certificate paths from it
+	// (<state>/cfg/config.toml), whatever WOLF_CFG_FILE says, so that is
+	// where the config has to be.
+	WolfStateDir = "/mnt/data/wolf"
 	// AnnotationWolfConfig carries Wolf's config.toml on the pod itself,
 	// mounted through the downward API: a pod and its config are one
 	// object, so the init container can never see a stale version (a
@@ -436,11 +441,11 @@ func BuildPod(a *store.App, cfg Config) (*corev1.Pod, error) {
 		// the app user), so it gets a runtime path of its own.
 		"XDG_RUNTIME_DIR":            RuntimeDir,
 		"PULSE_RUNTIME_PATH":         "/tmp/pulse-runtime",
-		"HOST_APPS_STATE_FOLDER":     "/mnt/data/wolf",
+		"HOST_APPS_STATE_FOLDER":     WolfStateDir,
 		bridge.EnvSocket:             bridge.DefaultSocket,
-		"WOLF_CFG_FILE":              WolfDir + "/cfg/config.toml",
-		"WOLF_PRIVATE_KEY_FILE":      WolfDir + "/cfg/key.pem",
-		"WOLF_PRIVATE_CERT_FILE":     WolfDir + "/cfg/cert.pem",
+		"WOLF_CFG_FILE":              WolfStateDir + "/cfg/config.toml",
+		"WOLF_PRIVATE_KEY_FILE":      WolfStateDir + "/cfg/key.pem",
+		"WOLF_PRIVATE_CERT_FILE":     WolfStateDir + "/cfg/cert.pem",
 		"WOLF_LOG_LEVEL":             "INFO",
 		"WOLF_RTSP_SETUP_PORT":       strconv.Itoa(int(ports.RTSP)),
 		"WOLF_CONTROL_PORT":          strconv.Itoa(int(ports.Control)),
@@ -461,7 +466,7 @@ func BuildPod(a *store.App, cfg Config) (*corev1.Pod, error) {
 	wolfMounts := []corev1.VolumeMount{
 		{Name: "runtime", MountPath: RuntimeDir},
 		{Name: "wolf", MountPath: WolfDir},
-		{Name: "wolf-state", MountPath: "/mnt/data/wolf"},
+		{Name: "wolf-state", MountPath: WolfStateDir},
 		{Name: "input", MountPath: "/dev/input"},
 		{Name: "uinput", MountPath: "/dev/uinput"},
 	}
@@ -504,13 +509,14 @@ func BuildPod(a *store.App, cfg Config) (*corev1.Pod, error) {
 				Command: []string{"/bin/sh", "-ec", strings.Join([]string{
 					"chown -R " + strconv.FormatInt(AppUID, 10) + ":" + strconv.FormatInt(AppUID, 10) + " " + RuntimeDir,
 					"chmod 1777 " + RuntimeDir,
-					"mkdir -p " + WolfDir + "/cfg",
-					"cp /podinfo/wolf-config " + WolfDir + "/cfg/config.toml",
-					"chmod -R 777 " + WolfDir,
+					"mkdir -p " + WolfDir + " " + WolfStateDir + "/cfg",
+					"cp /podinfo/wolf-config " + WolfStateDir + "/cfg/config.toml",
+					"chmod -R 777 " + WolfDir + " " + WolfStateDir,
 				}, "\n")},
 				VolumeMounts: []corev1.VolumeMount{
 					{Name: "runtime", MountPath: RuntimeDir},
 					{Name: "wolf", MountPath: WolfDir},
+					{Name: "wolf-state", MountPath: WolfStateDir},
 					{Name: "podinfo", MountPath: "/podinfo", ReadOnly: true},
 				},
 				Resources:       small("10m", "16Mi", "200m", "64Mi"),
