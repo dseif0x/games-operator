@@ -65,7 +65,10 @@ func TestBuildService(t *testing.T) {
 
 func TestBuildPod(t *testing.T) {
 	app := testApp()
-	pod := BuildPod(app, testCfg())
+	pod, err := BuildPod(app, testCfg())
+	if err != nil {
+		t.Fatal(err)
+	}
 	if pod.Annotations["games-operator.io/generation"] != "3" || !pod.Spec.HostIPC || *pod.Spec.RuntimeClassName != "nvidia" {
 		t.Fatalf("pod meta: %+v", pod.Spec)
 	}
@@ -119,7 +122,10 @@ func TestBuildPodFirefoxIsConfined(t *testing.T) {
 	app := testApp()
 	app.Preset = "firefox"
 	app.Env = nil
-	pod := BuildPod(app, testCfg())
+	pod, err := BuildPod(app, testCfg())
+	if err != nil {
+		t.Fatal(err)
+	}
 	if pod.Spec.HostIPC {
 		t.Fatal("firefox does not need hostIPC")
 	}
@@ -132,7 +138,10 @@ func TestBuildPodFirefoxIsConfined(t *testing.T) {
 func TestBuildPodUinputResource(t *testing.T) {
 	cfg := testCfg()
 	cfg.UinputResource = "squat.ai/uinput"
-	pod := BuildPod(testApp(), cfg)
+	pod, err := BuildPod(testApp(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
 	a := pod.Spec.Containers[0]
 	if q := a.Resources.Limits["squat.ai/uinput"]; q.String() != "1" {
 		t.Fatalf("uinput resource: %v", a.Resources.Limits)
@@ -194,5 +203,30 @@ func TestPodCrashing(t *testing.T) {
 	running := &corev1.Pod{Status: corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{{Name: "app", State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}}}}}}
 	if PodCrashing(running) {
 		t.Fatal("a running container is not crashing")
+	}
+}
+
+func TestPodCarriesWolfConfig(t *testing.T) {
+	cfg := testCfg()
+	cfg.ClientCertPEM = "-----BEGIN CERTIFICATE-----\nAAA\n-----END CERTIFICATE-----\n"
+	pod, err := BuildPod(testApp(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conf := pod.Annotations[AnnotationWolfConfig]
+	if !strings.Contains(conf, "[[paired_clients]]") || !strings.Contains(conf, "BEGIN CERTIFICATE") {
+		t.Fatalf("wolf config on the pod lacks the paired client:\n%s", conf)
+	}
+	var mounted bool
+	for _, v := range pod.Spec.Volumes {
+		if v.DownwardAPI != nil && len(v.DownwardAPI.Items) == 1 && strings.Contains(v.DownwardAPI.Items[0].FieldRef.FieldPath, AnnotationWolfConfig) {
+			mounted = true
+		}
+		if v.Secret != nil {
+			t.Fatal("no Secret volume: the config comes from the pod itself")
+		}
+	}
+	if !mounted || !strings.Contains(pod.Spec.InitContainers[0].Command[2], "/podinfo/wolf-config") {
+		t.Fatal("the init container must copy the config from the downward API volume")
 	}
 }

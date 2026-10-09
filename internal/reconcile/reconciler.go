@@ -313,30 +313,15 @@ func (r *Reconciler) reconcileStarting(ctx context.Context, app *store.App, o ob
 		created = true
 	}
 	gen := strconv.Itoa(app.Generation)
-	if o.secret == nil || o.secret.Annotations[k8s.AnnotationGeneration] != gen {
+	if o.secret == nil {
 		token, err := auth.NewToken()
 		if err != nil {
 			return err
 		}
-		wolfCfg, err := wolf.GenerateConfig(wolf.ConfigOptions{
-			Hostname: r.cfg.MoonlightHostname, UUID: app.ID, AppTitle: app.Name, RenderNode: r.cfg.RenderNode,
-			ClientCertPEM: r.cfg.ClientCertPEM, AppStateFolder: app.ID,
-		})
-		if err != nil {
-			return r.fail(ctx, app, "wolf config: "+err.Error())
+		if _, err := r.cs.CoreV1().Secrets(ns).Create(ctx, BuildSecret(app, r.cfg, token), metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
+			return r.fail(ctx, app, "create secret: "+err.Error())
 		}
-		secret := BuildSecret(app, r.cfg, token, wolfCfg)
-		if o.secret == nil {
-			if _, err := r.cs.CoreV1().Secrets(ns).Create(ctx, secret, metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
-				return r.fail(ctx, app, "create secret: "+err.Error())
-			}
-		} else {
-			secret.ResourceVersion = o.secret.ResourceVersion
-			if _, err := r.cs.CoreV1().Secrets(ns).Update(ctx, secret, metav1.UpdateOptions{}); err != nil {
-				return fmt.Errorf("rotate secret: %w", err)
-			}
-		}
-		r.event(ctx, app, "secret", "bridge token issued (generation "+gen+")")
+		r.event(ctx, app, "secret", "bridge token issued")
 		created = true
 	}
 	if o.svc == nil {
@@ -383,7 +368,10 @@ func (r *Reconciler) reconcileStarting(ctx context.Context, app *store.App, o ob
 		r.requeueSoon(app.ID)
 		return nil
 	}
-	pod := BuildPod(app, r.cfg)
+	pod, err := BuildPod(app, r.cfg)
+	if err != nil {
+		return r.fail(ctx, app, err.Error())
+	}
 	if _, err := r.cs.CoreV1().Pods(ns).Create(ctx, pod, metav1.CreateOptions{}); err != nil {
 		if apierrors.IsAlreadyExists(err) {
 			r.requeueSoon(app.ID)

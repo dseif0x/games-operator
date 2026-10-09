@@ -22,6 +22,7 @@ import (
 	"github.com/dseif0x/games-operator/internal/k8s"
 	"github.com/dseif0x/games-operator/internal/preset"
 	"github.com/dseif0x/games-operator/internal/store"
+	"github.com/dseif0x/games-operator/internal/wolf"
 )
 
 // Config is what the reconciler needs from the hub configuration.
@@ -113,8 +114,12 @@ const (
 	HomeDir = "/home/retro"
 	// WolfDir holds Wolf's socket and config inside the pod.
 	WolfDir = "/etc/wolf"
-	// SecretKeyConfig is the key of config.toml in the app Secret.
-	SecretKeyConfig = "config.toml"
+	// AnnotationWolfConfig carries Wolf's config.toml on the pod itself,
+	// mounted through the downward API: a pod and its config are one
+	// object, so the init container can never see a stale version (a
+	// Secret updated in the same instant as the pod is created can be
+	// served from the kubelet's cache).
+	AnnotationWolfConfig = "games-operator.io/wolf-config"
 	// AppUID is the user GOW images drop to.
 	AppUID int64 = 1000
 )
@@ -178,15 +183,24 @@ func BuildPVC(a *store.App, cfg Config) *corev1.PersistentVolumeClaim {
 
 // BuildSecret returns the per-app Secret: the bridge token and Wolf's
 // config.toml, both tied to the generation.
-func BuildSecret(a *store.App, cfg Config, token string, wolfConfig []byte) *corev1.Secret {
+// BuildSecret holds the bridge token. It is created once per app and
+// never updated: a container reads its Secret-backed env at creation,
+// possibly from the kubelet's cache, so a token rotated in the same
+// reconcile as the pod could be the previous one.
+func BuildSecret(a *store.App, cfg Config, token string) *corev1.Secret {
 	return &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: ObjectName(a.ID), Namespace: cfg.Namespace, Labels: Labels(a),
-			Annotations: map[string]string{k8s.AnnotationGeneration: strconv.Itoa(a.Generation)},
-		},
-		Type: corev1.SecretTypeOpaque,
-		Data: map[string][]byte{bridge.EnvToken: []byte(token), SecretKeyConfig: wolfConfig},
+		ObjectMeta: metav1.ObjectMeta{Name: ObjectName(a.ID), Namespace: cfg.Namespace, Labels: Labels(a)},
+		Type:       corev1.SecretTypeOpaque,
+		Data:       map[string][]byte{bridge.EnvToken: []byte(token)},
 	}
+}
+
+// WolfConfig renders the Wolf config.toml for an app.
+func WolfConfig(a *store.App, cfg Config) ([]byte, error) {
+	return wolf.GenerateConfig(wolf.ConfigOptions{
+		Hostname: cfg.MoonlightHostname, UUID: a.ID, AppTitle: a.Name, RenderNode: cfg.RenderNode,
+		ClientCertPEM: cfg.ClientCertPEM, AppStateFolder: a.ID,
+	})
 }
 
 // BuildService returns the LoadBalancer Service that exposes the app's
@@ -341,8 +355,12 @@ func Preset(a *store.App) preset.Preset {
 // /dev/input and /dev/uinput and ask for capabilities; the namespace must
 // allow that (Pod Security "privileged"). The preset decides how far an
 // app goes; nothing here is privileged in the Kubernetes sense.
-func BuildPod(a *store.App, cfg Config) *corev1.Pod {
+func BuildPod(a *store.App, cfg Config) (*corev1.Pod, error) {
 	cfg = cfg.Defaults()
+	wolfCfg, err := WolfConfig(a, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("wolf config: %w", err)
+	}
 	p := Preset(a)
 	ports := Ports(cfg.StreamPortBase, a.Slot)
 	name := ObjectName(a.ID)
@@ -464,7 +482,7 @@ func BuildPod(a *store.App, cfg Config) *corev1.Pod {
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name, Namespace: cfg.Namespace, Labels: Labels(a),
-			Annotations: map[string]string{k8s.AnnotationGeneration: strconv.Itoa(a.Generation)},
+			Annotations: map[string]string{k8s.AnnotationGeneration: strconv.Itoa(a.Generation), AnnotationWolfConfig: string(wolfCfg)},
 		},
 		Spec: corev1.PodSpec{
 			// Always: the app container exits when a re-keyed stream makes
@@ -479,20 +497,21 @@ func BuildPod(a *store.App, cfg Config) *corev1.Pod {
 			Tolerations:                   tolerations,
 			InitContainers: []corev1.Container{{
 				// Wolf and the app share the runtime dir as different users;
-				// the config comes from the Secret but Wolf wants to write
-				// next to it (certificates), hence the copy.
+				// the config comes from the pod's own annotation (downward
+				// API) but Wolf wants to write next to it (certificates),
+				// hence the copy.
 				Name: ContainerInit, Image: cfg.InitImage, ImagePullPolicy: pull,
 				Command: []string{"/bin/sh", "-ec", strings.Join([]string{
 					"chown -R " + strconv.FormatInt(AppUID, 10) + ":" + strconv.FormatInt(AppUID, 10) + " " + RuntimeDir,
 					"chmod 1777 " + RuntimeDir,
 					"mkdir -p " + WolfDir + "/cfg",
-					"cp /cfg/" + SecretKeyConfig + " " + WolfDir + "/cfg/config.toml",
+					"cp /podinfo/wolf-config " + WolfDir + "/cfg/config.toml",
 					"chmod -R 777 " + WolfDir,
 				}, "\n")},
 				VolumeMounts: []corev1.VolumeMount{
 					{Name: "runtime", MountPath: RuntimeDir},
 					{Name: "wolf", MountPath: WolfDir},
-					{Name: "config", MountPath: "/cfg", ReadOnly: true},
+					{Name: "podinfo", MountPath: "/podinfo", ReadOnly: true},
 				},
 				Resources:       small("10m", "16Mi", "200m", "64Mi"),
 				SecurityContext: &corev1.SecurityContext{RunAsUser: ptr.To[int64](0), RunAsGroup: ptr.To[int64](0)},
@@ -552,8 +571,8 @@ func BuildPod(a *store.App, cfg Config) *corev1.Pod {
 				{Name: "runtime", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
 				{Name: "wolf", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
 				{Name: "wolf-state", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
-				{Name: "config", VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{
-					SecretName: name, Items: []corev1.KeyToPath{{Key: SecretKeyConfig, Path: SecretKeyConfig}},
+				{Name: "podinfo", VolumeSource: corev1.VolumeSource{DownwardAPI: &corev1.DownwardAPIVolumeSource{
+					Items: []corev1.DownwardAPIVolumeFile{{Path: "wolf-config", FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.annotations['" + AnnotationWolfConfig + "']"}}},
 				}}},
 				{Name: "home", VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: name}}},
 				{Name: "input", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/dev/input", Type: ptr.To(corev1.HostPathDirectory)}}},
@@ -567,7 +586,7 @@ func BuildPod(a *store.App, cfg Config) *corev1.Pod {
 	if cfg.RuntimeClass != "" {
 		pod.Spec.RuntimeClassName = ptr.To(cfg.RuntimeClass)
 	}
-	return pod
+	return pod, nil
 }
 
 // PodReady reports whether the pod is Running with Ready=True (which
