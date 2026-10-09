@@ -97,9 +97,11 @@ browser:
     # -- Image of the games-operator fork of moonlight-web (embedded mode)
     repository: ghcr.io/dseif0x/moonlight-web
     # -- Fork tag (go-<version>)
-    tag: go-0.1.2
+    tag: go-0.1.3
     pullPolicy: IfNotPresent
-  # -- Run on the node's network so WebRTC media (UDP 48550-48573) can reach browsers on the LAN directly; off, the stream always uses the WebSocket transport through the hub, which is what a tunnel or a firewall between subnets needs anyway
+  # -- Transport between moonlight-web and the browser: `wss` (WebSocket through the hub; works everywhere, no fallbacks) or `auto` (try WebRTC first, which needs UDP from the browser to the pod, and fall back; every fallback re-launches the Moonlight session, which restarts the app in its new compositor)
+  transport: wss
+  # -- Run on the node's network so WebRTC media (UDP 48550-48573) can reach browsers on the LAN directly (only useful with transport auto)
   hostNetwork: false
   # -- HTTPS port (443 needs root or hostNetwork on a free port)
   httpsPort: 8443

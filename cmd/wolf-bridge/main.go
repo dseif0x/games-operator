@@ -113,18 +113,25 @@ func envOr(key, def string) string {
 
 // watchSocket flips ready once Wolf accepts connections on its socket and
 // keeps checking afterwards so a crashed Wolf shows up in readiness.
+// watchSocket flips ready when Wolf's API answers. It looks at the socket
+// file first and only talks to Wolf while it is not yet known to be up:
+// dialling and hanging up every second made Wolf log an EOF each time.
 func watchSocket(ctx context.Context, path string, ready *atomic.Bool, log *slog.Logger) {
 	t := time.NewTicker(time.Second)
 	defer t.Stop()
 	for {
-		conn, err := socketDialer(path, time.Second)(ctx)
-		if err == nil {
-			_ = conn.Close()
-			if ready.CompareAndSwap(false, true) {
-				log.Info("wolf socket ready", "path", path)
+		_, statErr := os.Stat(path)
+		switch {
+		case statErr != nil:
+			if ready.CompareAndSwap(true, false) {
+				log.Warn("wolf socket gone", "err", statErr)
 			}
-		} else if ready.CompareAndSwap(true, false) {
-			log.Warn("wolf socket gone", "err", err)
+		case !ready.Load():
+			if err := probeWolf(ctx, path); err == nil {
+				if ready.CompareAndSwap(false, true) {
+					log.Info("wolf socket ready", "path", path)
+				}
+			}
 		}
 		select {
 		case <-ctx.Done():
@@ -132,6 +139,27 @@ func watchSocket(ctx context.Context, path string, ready *atomic.Bool, log *slog
 		case <-t.C:
 		}
 	}
+}
+
+// probeWolf sends one small request and expects an HTTP status line back.
+func probeWolf(ctx context.Context, path string) error {
+	conn, err := socketDialer(path, time.Second)(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(2 * time.Second))
+	if _, err := io.WriteString(conn, "GET /api/v1/sessions HTTP/1.0\r\nHost: wolf\r\n\r\n"); err != nil {
+		return err
+	}
+	line, err := bufio.NewReader(conn).ReadString('\n')
+	if err != nil {
+		return err
+	}
+	if !strings.HasPrefix(line, "HTTP/1.") {
+		return errors.New("unexpected answer: " + strings.TrimSpace(line))
+	}
+	return nil
 }
 
 func requireToken(token string, next http.Handler) http.Handler {

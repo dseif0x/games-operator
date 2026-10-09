@@ -449,7 +449,10 @@ func BuildPod(a *store.App, cfg Config) *corev1.Pod {
 			Annotations: map[string]string{k8s.AnnotationGeneration: strconv.Itoa(a.Generation)},
 		},
 		Spec: corev1.PodSpec{
-			RestartPolicy:                 corev1.RestartPolicyNever,
+			// Always: the app container exits when a re-keyed stream makes
+			// Wolf rebuild its compositor (the Wayland socket goes away), and
+			// must come back for the next session; a crashed Wolf likewise.
+			RestartPolicy:                 corev1.RestartPolicyAlways,
 			AutomountServiceAccountToken:  ptr.To(false),
 			EnableServiceLinks:            ptr.To(false),
 			TerminationGracePeriodSeconds: ptr.To[int64](30),

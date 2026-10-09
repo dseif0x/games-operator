@@ -58,6 +58,10 @@ kubectl apply -f https://raw.githubusercontent.com/dseif0x/games-operator/main/h
 
 **Play in browser** on an app opens `/play/#app=<id>`. The player asks the hub to prepare the app (`POST /api/v1/apps/{id}/play`: starts the pod, mints the user's browser token, makes the shared moonlight-web pairing follow the user), adds and pairs the Moonlight host on its own, waits for the pod while showing the hub's progress, then launches. One host name, one Ingress, one certificate; the stream falls back to moonlight-web's WebSocket transport through the hub where WebRTC's UDP cannot reach the browser (a Cloudflare tunnel, a firewall between subnets). `browser.hostNetwork: true` additionally exposes the UDP media ports on the node for browsers on the same LAN.
 
+The player uses moonlight-web's WebSocket transport by default (`browser.transport: wss`): it rides the same HTTPS connection as everything else, so it works through the hub, a tunnel or a firewall between subnets. `auto` tries WebRTC first; when its UDP path fails the chain falls back, but every fallback re-launches the Moonlight session, and a re-launch currently restarts the app (next paragraph).
+
+**Resuming restarts the app.** A Moonlight resume (a client reconnecting, a transport fallback) brings new stream keys, and the hub can only give Wolf new keys by stopping its session and adding one; Wolf then rebuilds its compositor, the app loses its Wayland display and its container restarts into the new one. Wolf's own resume keeps the compositor, but only through its HTTPS API; a session resume on the Wolf API would remove this limitation.
+
 moonlight-web is one Moonlight client for every browser. Its pairing is bound to whoever pressed Play last, so two different hub users cannot play through it at the same time; the same user on several devices can.
 
 `browser.externalUrl` (with `enabled: false`) only adds a link to a stock moonlight-web you run elsewhere; pair it by hand through the Pair page or the Account page's API token.

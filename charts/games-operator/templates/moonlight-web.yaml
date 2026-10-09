@@ -42,6 +42,8 @@ spec:
               value: {{ .Values.browser.httpPort | quote }}
             - name: MW_UPNP
               value: "0"
+            - name: MW_TRANSPORT_MODE
+              value: {{ .Values.browser.transport | quote }}
             - name: MW_EMBEDDED_SECRET
               valueFrom:
                 secretKeyRef:
