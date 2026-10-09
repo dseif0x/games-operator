@@ -231,9 +231,18 @@ func (r *Reconciler) ReconcileOne(ctx context.Context, id string) error {
 	case store.StateStopped:
 		return r.reconcileStopped(ctx, app, o)
 	case store.StateFailed:
-		// Keep the pod for logs, but free the shared IP's ports.
+		// Free the shared IP's ports at once; keep the pod for its logs for
+		// a while, then let go of it (and with it the GPU and the node).
 		if o.svc != nil && o.svc.DeletionTimestamp == nil {
 			return r.deleteService(ctx, app.ID)
+		}
+		if o.pod != nil && o.pod.DeletionTimestamp == nil {
+			if left := r.cfg.FailedPodGrace - r.now().Sub(app.UpdatedAt); left > 0 {
+				r.queue.AddAfter(app.ID, left)
+				return nil
+			}
+			r.event(ctx, app, "pod", "deleted after failure")
+			return r.deletePod(ctx, app.ID)
 		}
 		return nil
 	case store.StateDeleting:
@@ -477,9 +486,18 @@ func (r *Reconciler) reconcileRunning(ctx context.Context, app *store.App, o obs
 		return r.fail(ctx, app, "pod was deleted outside games-operator")
 	case PodTerminal(o.pod):
 		return r.fail(ctx, app, PodReason(o.pod))
+	case PodCrashing(o.pod):
+		// Containers that cannot run any more (the GPU fell off the bus,
+		// a node rebooted under the pod): this pod will not recover.
+		return r.fail(ctx, app, PodReason(o.pod))
 	case app.WolfSessionID == "":
-		// Re-keyed by a resume: register the new stream.
+		// Re-keyed by a resume: register the new stream once the pod is
+		// ready again (the app container restarts after a compositor
+		// rebuild). Not ready for as long as a start may take: give up.
 		if !PodReady(o.pod) {
+			if r.now().Sub(app.UpdatedAt) > r.cfg.StartingTimeout {
+				return r.fail(ctx, app, "pod not ready after "+r.cfg.StartingTimeout.String()+": "+PodReason(o.pod))
+			}
 			r.requeueSoon(app.ID)
 			return nil
 		}

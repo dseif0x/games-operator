@@ -54,6 +54,10 @@ type Config struct {
 	// OrphanGrace is how old a labelled object without a row must be
 	// before it is deleted.
 	OrphanGrace time.Duration
+	// FailedPodGrace is how long a failed app keeps its pod around for the
+	// logs before the reconciler deletes it; the GPU and the node are not
+	// released before that.
+	FailedPodGrace time.Duration
 	// StartingTimeout marks an app failed when its stream is not up in time
 	// (the GPU node may have to boot first).
 	StartingTimeout time.Duration
@@ -66,6 +70,9 @@ func (c Config) Defaults() Config {
 	}
 	if c.StartingTimeout == 0 {
 		c.StartingTimeout = 10 * time.Minute
+	}
+	if c.FailedPodGrace == 0 {
+		c.FailedPodGrace = 5 * time.Minute
 	}
 	if c.ImagePullPolicy == "" {
 		c.ImagePullPolicy = "IfNotPresent"
@@ -569,6 +576,26 @@ func PodReady(pod *corev1.Pod) bool {
 // PodTerminal reports whether the pod has finished for good.
 func PodTerminal(pod *corev1.Pod) bool {
 	return pod != nil && (pod.Status.Phase == corev1.PodFailed || pod.Status.Phase == corev1.PodSucceeded)
+}
+
+// PodCrashing reports a pod whose containers cannot run any more: a crash
+// loop, a container that fails to be created (the GPU vanished, the CDI
+// spec is not there yet after a node reboot), an image that cannot be
+// pulled. Such a pod never becomes ready again on its own.
+func PodCrashing(pod *corev1.Pod) bool {
+	if pod == nil {
+		return false
+	}
+	for _, cs := range append(append([]corev1.ContainerStatus{}, pod.Status.InitContainerStatuses...), pod.Status.ContainerStatuses...) {
+		if cs.State.Waiting == nil {
+			continue
+		}
+		switch cs.State.Waiting.Reason {
+		case "CrashLoopBackOff", "StartError", "RunContainerError", "CreateContainerError", "CreateContainerConfigError", "ImagePullBackOff", "ErrImagePull", "InvalidImageName":
+			return true
+		}
+	}
+	return false
 }
 
 // PodReason summarises why a pod is not ready, for the state_reason column.

@@ -168,3 +168,21 @@ func TestPodReason(t *testing.T) {
 		t.Fatal("pending pod is neither ready nor terminal")
 	}
 }
+
+func TestPodCrashing(t *testing.T) {
+	waiting := func(reason string) *corev1.Pod {
+		return &corev1.Pod{Status: corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{{Name: "app", State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: reason}}}}}}
+	}
+	if PodCrashing(nil) || PodCrashing(waiting("ContainerCreating")) || PodCrashing(waiting("PodInitializing")) {
+		t.Fatal("benign waits are not crashes")
+	}
+	for _, reason := range []string{"CrashLoopBackOff", "StartError", "RunContainerError", "ImagePullBackOff"} {
+		if !PodCrashing(waiting(reason)) {
+			t.Fatalf("%s must count as crashing", reason)
+		}
+	}
+	running := &corev1.Pod{Status: corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{{Name: "app", State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}}}}}}
+	if PodCrashing(running) {
+		t.Fatal("a running container is not crashing")
+	}
+}
