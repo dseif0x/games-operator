@@ -97,7 +97,7 @@ browser:
     # -- Image of the games-operator fork of moonlight-web (embedded mode)
     repository: ghcr.io/dseif0x/moonlight-web
     # -- Fork tag (go-<version>)
-    tag: go-0.1.5
+    tag: go-0.1.6
     pullPolicy: IfNotPresent
   # -- Video codec moonlight-web asks the host for: `h264` plays in every browser; `auto` lets moonlight-web pick HEVC or AV1 when the browser claims support, and a browser that then cannot decode (desktop Firefox with HEVC) makes it re-launch the session, which restarts the app
   codec: h264

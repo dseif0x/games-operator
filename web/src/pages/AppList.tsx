@@ -71,7 +71,14 @@ export function AppList(props: { user: User; onLogout: () => void }) {
         <p class="muted hint">
           Apps start when a Moonlight client launches them. Add <code>{defaults.moonlight_host || "the LoadBalancer IP"}</code> as a host in
           Moonlight, <Link href="/pair">pair it</Link>, and pick the app there.
-          {defaults.browser_url ? <> Or press <b>Play in browser</b>: it starts the app, pairs on its own and streams right here.</> : null}
+          {defaults.browser_url ? (
+            <>
+              {" "}
+              Or press <b>Play in browser</b>: it starts the app, pairs on its own and streams right here. Codec, bitrate and resolution for this
+              browser:{" "}
+              <a href={`${defaults.browser_url}#settings`}>player settings</a>.
+            </>
+          ) : null}
         </p>
       )}
       {apps === null ? (
