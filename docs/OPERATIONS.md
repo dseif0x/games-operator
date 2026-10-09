@@ -81,7 +81,9 @@ A launch creates a pod requesting `nvidia.com/gpu`; a pending pod is what node a
 
 ## Input devices
 
-Wolf creates a virtual mouse, keyboard and one controller per client on the node through `/dev/uinput` and `/dev/uhid` (DualSense), and the app reads the `/dev/input` nodes as they appear. A hostPath puts those nodes into a container, but the device cgroup still refuses to open them, so the Wolf and app containers run privileged; the bridge does not. This is why the namespace needs the `privileged` Pod Security level.
+Wolf creates a virtual mouse, keyboard and one controller per client on the node through `/dev/uinput` and `/dev/uhid` (DualSense), and the app reads the `/dev/input` and `/dev/hidraw*` nodes as they appear. A hostPath puts those nodes into a container, but the device cgroup still refuses to open them, so the Wolf and app containers run privileged; the bridge does not. This is why the namespace needs the `privileged` Pod Security level. The app container mounts the node's whole `/dev`: a privileged container's own `/dev` is a snapshot taken when it starts, and the controller's nodes only exist once a client connects.
+
+A pod has no udevd, and the node's udevd never speaks into the pod's network namespace, so the bridge stands in for it (`internal/udev`, the equivalent of Wolf's `fake-udev` for its docker runner). It watches the node's `/dev` and, for every virtual device, writes the udev database entry into a `/run/udev` shared with Wolf and the app (libinput in Wolf's compositor and SDL in the app both refuse a device udev has not "initialized"), opens the node to everyone, and multicasts the hotplug message libudev clients listen for, so a Steam that is already running picks the controller up. The bridge needs `NET_ADMIN` for that multicast; without it (or without the `/host/dev` mount of an older pod spec) the database is still written and only apps started after the device see it. `wolf-bridge` logs `input device plugged` with the node and its class.
 
 ## When the GPU node dies
 
@@ -99,7 +101,7 @@ Game libraries are large and re-downloadable: put app home volumes on the GPU no
 | pairing never completes | the UI's Pair page must show the pending request; if not, the HTTPS port (47984) is blocked. PIN timeout is 2 minutes. |
 | app stuck in `starting` | the app page shows the reason (Unschedulable, ImagePullBackOff, "waiting for LoadBalancer IP"); logs tab per container. 10-minute timeout → `failed`. |
 | stream starts, black screen | `wolf` container logs: encoder (nvcodec) found? `runtimeClassName: nvidia` and `NVIDIA_VISIBLE_DEVICES` in place? |
-| no controller input | `/dev/uinput` and `/dev/input` must exist on the node; with a generic device plugin set `apps.uinputResource`. |
+| no controller input | `wolf-bridge` logs: `input device plugged … class=joystick` after the client connected? If not, `/dev/uinput` and `/dev/uhid` must exist on the node and the `wolf` logs show `Creating … joypad`. If so but the game ignores it, check the app's `/run/udev/data/c13:*` entries and the client (browser gamepad tester under Settings). |
 | second user cannot start | all `moonlight.maxConcurrent` slots in use, or a time-sliced GPU with too few replicas. |
 
 Metrics: `/metrics` (Go/process metrics; `metrics.serviceMonitor.enabled` for Prometheus). Logs: JSON on stdout, `logLevel: debug` for reconcile details.

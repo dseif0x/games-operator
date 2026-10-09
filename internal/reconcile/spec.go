@@ -431,14 +431,16 @@ func BuildPod(a *store.App, cfg Config) (*corev1.Pod, error) {
 		appResources.Limits[corev1.ResourceName(cfg.UinputResource)] = q
 		appResources.Requests[corev1.ResourceName(cfg.UinputResource)] = q
 	}
+	// The node's /dev, whole: the input and hidraw nodes of the virtual
+	// devices Wolf creates appear there while the app is running, and a
+	// privileged container's own /dev is a snapshot taken at start. The
+	// bridge announces each one through /run/udev (see internal/udev).
 	appMounts := []corev1.VolumeMount{
 		{Name: "runtime", MountPath: RuntimeDir},
 		{Name: "home", MountPath: HomeDir},
-		{Name: "input", MountPath: "/dev/input"},
+		{Name: "dev", MountPath: "/dev"},
 		{Name: "shm", MountPath: "/dev/shm"},
-	}
-	if cfg.UinputResource == "" {
-		appMounts = append(appMounts, corev1.VolumeMount{Name: "uinput", MountPath: "/dev/uinput"})
+		{Name: "udev", MountPath: "/run/udev", ReadOnly: true},
 	}
 
 	wolfEnv := map[string]string{
@@ -477,6 +479,9 @@ func BuildPod(a *store.App, cfg Config) (*corev1.Pod, error) {
 		{Name: "wolf-state", MountPath: WolfStateDir},
 		{Name: "input", MountPath: "/dev/input"},
 		{Name: "uinput", MountPath: "/dev/uinput"},
+		// Wolf's compositor adds the controllers through libinput, which
+		// refuses a device udev has not initialized: the bridge's database.
+		{Name: "udev", MountPath: "/run/udev", ReadOnly: true},
 	}
 
 	nodeSelector := map[string]string{}
@@ -565,9 +570,15 @@ func BuildPod(a *store.App, cfg Config) (*corev1.Pod, error) {
 							LocalObjectReference: corev1.LocalObjectReference{Name: name}, Key: bridge.EnvToken,
 						}}},
 					},
-					Ports:        []corev1.ContainerPort{{Name: "bridge", ContainerPort: bridge.Port, Protocol: corev1.ProtocolTCP}},
-					Resources:    small("10m", "32Mi", "200m", "64Mi"),
-					VolumeMounts: []corev1.VolumeMount{{Name: "wolf", MountPath: WolfDir}},
+					Ports:     []corev1.ContainerPort{{Name: "bridge", ContainerPort: bridge.Port, Protocol: corev1.ProtocolTCP}},
+					Resources: small("10m", "32Mi", "200m", "64Mi"),
+					VolumeMounts: []corev1.VolumeMount{
+						{Name: "wolf", MountPath: WolfDir},
+						// The hotplug announcer: watches the node's /dev,
+						// writes the udev database, opens the nodes up.
+						{Name: "dev", MountPath: bridge.HostDev},
+						{Name: "udev", MountPath: bridge.UdevDir},
+					},
 					ReadinessProbe: &corev1.Probe{
 						ProbeHandler:        corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{Path: "/readyz", Port: intstr.FromInt32(bridge.Port)}},
 						InitialDelaySeconds: 2, PeriodSeconds: 3, FailureThreshold: 2,
@@ -579,7 +590,8 @@ func BuildPod(a *store.App, cfg Config) (*corev1.Pod, error) {
 					SecurityContext: &corev1.SecurityContext{
 						RunAsUser: ptr.To[int64](0), RunAsGroup: ptr.To[int64](0),
 						AllowPrivilegeEscalation: ptr.To(false), ReadOnlyRootFilesystem: ptr.To(true),
-						Capabilities: &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
+						// NET_ADMIN: hotplug messages are netlink multicasts.
+						Capabilities: &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}, Add: []corev1.Capability{"NET_ADMIN"}},
 					},
 				},
 			},
@@ -593,6 +605,8 @@ func BuildPod(a *store.App, cfg Config) (*corev1.Pod, error) {
 				{Name: "home", VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: name}}},
 				{Name: "input", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/dev/input", Type: ptr.To(corev1.HostPathDirectory)}}},
 				{Name: "uinput", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/dev/uinput", Type: ptr.To(corev1.HostPathCharDev)}}},
+				{Name: "dev", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/dev", Type: ptr.To(corev1.HostPathDirectory)}}},
+				{Name: "udev", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
 				{Name: "shm", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{
 					Medium: corev1.StorageMediumMemory, SizeLimit: ptr.To(resource.MustParse("4Gi")),
 				}}},

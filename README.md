@@ -40,7 +40,7 @@ For the browser: enable `browser.enabled`. The hub then serves the games-operato
 
 - A node with an NVIDIA GPU, the NVIDIA device plugin and `runtimeClassName: nvidia` (AMD/Intel work with Wolf too; set `apps.runtimeClassName` empty and pass the DRI device by other means).
 - MetalLB (or Cilium LB-IPAM) for the shared LoadBalancer IP.
-- Pod Security `privileged` on the namespace: game containers run as root with `hostIPC`, `/dev/input`, `/dev/uinput` and extra capabilities. The hub itself is non-root, read-only and capability-less.
+- Pod Security `privileged` on the namespace: game containers run as root with `hostIPC`, the node's `/dev` and extra capabilities (Wolf creates the virtual input devices there). The hub itself is non-root, read-only and capability-less.
 - Postgres (chart dependency or `database.existingSecret`).
 
 ## Development

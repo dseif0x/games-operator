@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -24,6 +25,7 @@ import (
 	"time"
 
 	"github.com/dseif0x/games-operator/internal/bridge"
+	"github.com/dseif0x/games-operator/internal/udev"
 )
 
 var version = "dev"
@@ -59,6 +61,7 @@ func run() error {
 	go watchSocket(ctx, *socket, &ready, log)
 	tracker := &streamTracker{}
 	go tracker.follow(ctx, *socket, &ready, log)
+	go announceDevices(ctx, log)
 
 	client := &http.Client{
 		Transport: &http.Transport{
@@ -102,6 +105,33 @@ func run() error {
 	sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	return srv.Shutdown(sctx)
+}
+
+// announceDevices runs the udev stand-in (internal/udev) when the pod
+// mounts the node's /dev for it; an older pod spec without the mount
+// gets the bridge without hotplug.
+func announceDevices(ctx context.Context, log *slog.Logger) {
+	hostDev := envOr("WOLF_BRIDGE_HOST_DEV", bridge.HostDev)
+	if st, err := os.Stat(filepath.Join(hostDev, "input")); err != nil || !st.IsDir() {
+		log.Info("input hotplug off: no host /dev mounted", "path", hostDev)
+		return
+	}
+	m := &udev.Manager{DevRoot: hostDev, UdevDir: envOr("WOLF_BRIDGE_UDEV_DIR", bridge.UdevDir), Log: log}
+	if s, err := udev.Open(); err != nil {
+		log.Warn("hotplug messages off (netlink); apps see devices only when they start", "err", err)
+	} else {
+		defer s.Close()
+		m.Send = s.Send
+	}
+	for ctx.Err() == nil {
+		if err := m.Run(ctx); err != nil {
+			log.Warn("input hotplug watcher stopped", "err", err)
+		}
+		select {
+		case <-ctx.Done():
+		case <-time.After(5 * time.Second):
+		}
+	}
 }
 
 func envOr(key, def string) string {

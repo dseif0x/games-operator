@@ -231,6 +231,61 @@ func TestPodCarriesWolfConfig(t *testing.T) {
 	}
 }
 
+func TestInputHotplugMounts(t *testing.T) {
+	pod, err := BuildPod(testApp(), testCfg())
+	if err != nil {
+		t.Fatal(err)
+	}
+	mounts := func(name string) map[string]corev1.VolumeMount {
+		out := map[string]corev1.VolumeMount{}
+		for _, c := range pod.Spec.Containers {
+			if c.Name == name {
+				for _, m := range c.VolumeMounts {
+					out[m.MountPath] = m
+				}
+			}
+		}
+		return out
+	}
+	app, wolf, br := mounts(ContainerApp), mounts(ContainerWolf), mounts(ContainerBridge)
+	if m, ok := app["/dev"]; !ok || m.Name != "dev" || m.ReadOnly {
+		t.Fatalf("the app needs the node's /dev (hotplugged nodes): %+v", app)
+	}
+	if m, ok := app["/dev/shm"]; !ok || m.Name != "shm" {
+		t.Fatal("the app's /dev/shm must stay the pod's own")
+	}
+	for name, ms := range map[string]map[string]corev1.VolumeMount{"app": app, "wolf": wolf} {
+		if m, ok := ms["/run/udev"]; !ok || m.Name != "udev" || !m.ReadOnly {
+			t.Fatalf("%s must read the bridge's udev directory: %+v", name, ms)
+		}
+	}
+	if m, ok := br[bridge.HostDev]; !ok || m.Name != "dev" || m.ReadOnly {
+		t.Fatal("the bridge must see the node's /dev read-write (node permissions)")
+	}
+	if m, ok := br[bridge.UdevDir]; !ok || m.Name != "udev" || m.ReadOnly {
+		t.Fatal("the bridge must write the udev directory")
+	}
+	vols := map[string]corev1.Volume{}
+	for _, v := range pod.Spec.Volumes {
+		vols[v.Name] = v
+	}
+	if v := vols["dev"]; v.HostPath == nil || v.HostPath.Path != "/dev" {
+		t.Fatalf("dev volume: %+v", v)
+	}
+	if v := vols["udev"]; v.EmptyDir == nil {
+		t.Fatalf("udev volume: %+v", v)
+	}
+	var caps []corev1.Capability
+	for _, c := range pod.Spec.Containers {
+		if c.Name == ContainerBridge {
+			caps = c.SecurityContext.Capabilities.Add
+		}
+	}
+	if len(caps) != 1 || caps[0] != "NET_ADMIN" {
+		t.Fatalf("the bridge needs NET_ADMIN for netlink multicasts, got %v", caps)
+	}
+}
+
 func TestWolfAndAppArePrivileged(t *testing.T) {
 	pod, err := BuildPod(testApp(), testCfg())
 	if err != nil {

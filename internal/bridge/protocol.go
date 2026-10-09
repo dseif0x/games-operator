@@ -17,6 +17,14 @@ const EnvSocket = "WOLF_SOCKET_PATH"
 // DefaultSocket is where the session pod mounts Wolf's socket directory.
 const DefaultSocket = "/etc/wolf/wolf.sock"
 
+// HostDev is where the session pod mounts the node's /dev for the bridge,
+// which watches it for the virtual input devices Wolf creates.
+const HostDev = "/host/dev"
+
+// UdevDir is the udev runtime directory the bridge maintains, mounted as
+// /run/udev in Wolf and the app.
+const UdevDir = "/run/udev"
+
 // Status is what GET /status on the bridge returns: whether a Moonlight
 // client is currently streaming, derived from Wolf's event stream.
 type Status struct {

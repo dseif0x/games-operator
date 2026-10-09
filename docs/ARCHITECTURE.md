@@ -22,7 +22,7 @@ moonlight-web ──▶ /wolf/api/v1/pair/* (bearer token)                      
 
 **Hub.** One process, one replica. It serves the SPA and REST API, speaks the Moonlight protocol on two extra ports, reconciles app rows into Kubernetes objects, and answers moonlight-web's Wolf-style pairing calls. No leader election: the informers, the pairing handshakes and the reconcile queue are in-memory and single-instance.
 
-**wolf-bridge.** Wolf's API is a unix socket. The bridge serves it over TCP inside the pod, guarded by a bearer token that the hub mints per launch, reports readiness once the socket answers (that is the pod's readiness), and follows Wolf's event stream to know whether a client is streaming.
+**wolf-bridge.** Wolf's API is a unix socket. The bridge serves it over TCP inside the pod, guarded by a bearer token that the hub mints per launch, reports readiness once the socket answers (that is the pod's readiness), and follows Wolf's event stream to know whether a client is streaming. It also stands in for udevd: it watches the node's `/dev` for the virtual input devices Wolf creates and announces them to Wolf and the app through a shared `/run/udev` and netlink hotplug messages (`internal/udev`, see OPERATIONS → Input devices).
 
 **App pod.** Built by `reconcile.BuildPod`: an init container prepares the shared runtime directory and copies Wolf's `config.toml`; `wolf` renders and encodes; `pulseaudio` provides the virtual sink; `app` is the user's image, started by a wrapper that waits for Wolf's Wayland and Pulse sockets before running the image entrypoint. The app's home (`/home/retro`) is a PVC; everything else is ephemeral.
 
