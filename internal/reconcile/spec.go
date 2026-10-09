@@ -403,9 +403,17 @@ func BuildPod(a *store.App, cfg Config) (*corev1.Pod, error) {
 	for _, c := range caps {
 		capList = append(capList, corev1.Capability(c))
 	}
+	// Privileged: Wolf creates the virtual mouse, keyboard and controllers
+	// on the node through /dev/uinput and /dev/uhid, and the app reads the
+	// resulting /dev/input nodes as they appear. A hostPath puts the nodes
+	// in the container, but the device cgroup still refuses to open them;
+	// only a privileged container (or a device plugin, which cannot cover
+	// nodes created at runtime) gets through. The namespace is `privileged`
+	// for exactly this.
 	appSec := &corev1.SecurityContext{
 		RunAsUser:                ptr.To[int64](0),
 		RunAsGroup:               ptr.To[int64](0),
+		Privileged:               ptr.To(true),
 		AllowPrivilegeEscalation: ptr.To(true),
 		Capabilities:             &corev1.Capabilities{Add: capList},
 	}
@@ -544,6 +552,8 @@ func BuildPod(a *store.App, cfg Config) (*corev1.Pod, error) {
 					},
 					SecurityContext: &corev1.SecurityContext{
 						RunAsUser: ptr.To[int64](0), RunAsGroup: ptr.To[int64](0),
+						// See appSec: uinput and uhid for the virtual input devices.
+						Privileged:   ptr.To(true),
 						Capabilities: &corev1.Capabilities{Add: []corev1.Capability{"NET_RAW", "MKNOD", "NET_ADMIN", "SYS_ADMIN", "SYS_NICE"}},
 					},
 				},

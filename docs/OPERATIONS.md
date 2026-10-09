@@ -79,6 +79,10 @@ A launch creates a pod requesting `nvidia.com/gpu`; a pending pod is what node a
 - **Start** in the UI (`POST /api/v1/apps/{id}/start`) warms an app up without a client: the pod comes up and the app shows *Ready*. A launch then streams at once. Use it before sitting down to play, or when the node is asleep.
 - After the stream ends, or if no client ever comes, the app is stopped `apps.idleStopAfter` later (default 15 min), the pod disappears and the node can power off.
 
+## Input devices
+
+Wolf creates a virtual mouse, keyboard and one controller per client on the node through `/dev/uinput` and `/dev/uhid` (DualSense), and the app reads the `/dev/input` nodes as they appear. A hostPath puts those nodes into a container, but the device cgroup still refuses to open them, so the Wolf and app containers run privileged; the bridge does not. This is why the namespace needs the `privileged` Pod Security level.
+
 ## When the GPU node dies
 
 A GPU that falls off the bus (NVIDIA Xid 79) or a node reboot under a running pod leaves containers that cannot be created any more. The reconciler marks such an app failed as soon as a container reports a crash loop, a start error or a pull error, and deletes the failed app's pod after `FailedPodGrace` (5 min; long enough to read its logs in the UI) so the GPU and the node are released. Play, or Start, then builds a fresh pod. A running app whose pod stops being ready and does not come back within the starting timeout is failed as well.

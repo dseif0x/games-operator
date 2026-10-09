@@ -230,3 +230,23 @@ func TestPodCarriesWolfConfig(t *testing.T) {
 		t.Fatal("the init container must copy the config from the downward API volume into Wolf's state folder")
 	}
 }
+
+func TestWolfAndAppArePrivileged(t *testing.T) {
+	pod, err := BuildPod(testApp(), testCfg())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range pod.Spec.Containers {
+		priv := c.SecurityContext != nil && c.SecurityContext.Privileged != nil && *c.SecurityContext.Privileged
+		switch c.Name {
+		case ContainerApp, ContainerWolf:
+			if !priv {
+				t.Fatalf("%s must be privileged for the virtual input devices", c.Name)
+			}
+		default:
+			if priv {
+				t.Fatalf("%s must not be privileged", c.Name)
+			}
+		}
+	}
+}
