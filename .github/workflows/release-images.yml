@@ -35,6 +35,29 @@ jobs:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      # The Dockerfiles compile with --mount=type=cache for Go's module and
+      # build caches. The layer cache (type=gha below) does not contain those
+      # mounts, so without this every run recompiles everything for both
+      # architectures. cache-dance persists the mount contents through
+      # actions/cache: injected before the build, extracted after it.
+      - id: gocache
+        uses: actions/cache@v4
+        with:
+          path: |
+            go-build-cache
+            go-mod-cache
+          key: go-docker-${{ matrix.name }}-${{ hashFiles('go.sum') }}-${{ github.sha }}
+          restore-keys: |
+            go-docker-${{ matrix.name }}-${{ hashFiles('go.sum') }}-
+            go-docker-${{ matrix.name }}-
+      - uses: reproducible-containers/buildkit-cache-dance@v3.4.0
+        with:
+          cache-map: |
+            {
+              "go-build-cache": "/root/.cache/go-build",
+              "go-mod-cache": "/go/pkg/mod"
+            }
+          skip-extraction: ${{ steps.gocache.outputs.cache-hit }}
       - id: meta
         uses: docker/metadata-action@v5
         with:
