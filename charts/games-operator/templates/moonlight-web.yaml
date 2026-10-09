@@ -43,6 +43,8 @@ spec:
               value: "0"
             - name: MW_TRANSPORT_MODE
               value: {{ .Values.browser.transport | quote }}
+            - name: MW_VIDEO_CODEC
+              value: {{ .Values.browser.codec | quote }}
             - name: MW_EMBEDDED_SECRET
               valueFrom:
                 secretKeyRef:

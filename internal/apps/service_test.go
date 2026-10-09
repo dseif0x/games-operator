@@ -161,12 +161,21 @@ func TestLaunchStopDelete(t *testing.T) {
 	if _, err := s.Update(ctx, u, b.ID, CreateRequest{Name: "Firefox 2", Preset: "firefox"}); !errors.Is(err, ErrInvalidTransition) {
 		t.Fatalf("update running: %v", err)
 	}
+	// A client's cancel ends its stream; the app keeps running until the
+	// user (or the idle stop) stops it.
 	if err := s.Cancel(ctx, u); err != nil {
 		t.Fatal(err)
 	}
 	rb, _ = s.Get(ctx, u.ID, b.ID)
-	if rb.State != store.StateStopped || rb.Slot != -1 {
+	if rb.State != store.StateRunning || rb.Stream != nil {
 		t.Fatalf("after cancel: %+v", rb)
+	}
+	if _, err := s.Stop(ctx, u, b.ID); err != nil {
+		t.Fatalf("stop: %v", err)
+	}
+	rb, _ = s.Get(ctx, u.ID, b.ID)
+	if rb.State != store.StateStopped || rb.Slot != -1 {
+		t.Fatalf("after stop: %+v", rb)
 	}
 	if _, err := s.Stop(ctx, u, b.ID); !errors.Is(err, ErrInvalidTransition) {
 		t.Fatalf("stop stopped: %v", err)
@@ -265,12 +274,16 @@ func TestLaunchWhileStartingKeepsPod(t *testing.T) {
 	if err != nil || url == "" {
 		t.Fatalf("launch after warm-up: %v %q", err, url)
 	}
-	// Cancel on a running app still quits it.
+	// Cancel on a streaming app ends the stream but keeps the app running.
 	if err := s.Cancel(ctx, u); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := s.Get(ctx, u.ID, a.ID); got.State != store.StateStopped {
-		t.Fatalf("cancel while running: %s", got.State)
+	if got, _ := s.Get(ctx, u.ID, a.ID); got.State != store.StateRunning || got.Stream != nil || s.View(got).Streaming {
+		t.Fatalf("cancel while streaming must keep the app: %s stream=%v", got.State, got.Stream)
+	}
+	// ... and the next launch streams again.
+	if url, err := s.Launch(ctx, u, pairing, a.MoonlightID, second, false); err != nil || url == "" {
+		t.Fatalf("launch after cancel: %v %q", err, url)
 	}
 }
 

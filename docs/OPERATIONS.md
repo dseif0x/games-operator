@@ -60,6 +60,10 @@ kubectl apply -f https://raw.githubusercontent.com/dseif0x/games-operator/main/h
 
 The player uses moonlight-web's WebSocket transport by default (`browser.transport: wss`): it rides the same HTTPS connection as everything else, so it works through the hub, a tunnel or a firewall between subnets. `auto` tries WebRTC first; when its UDP path fails the chain falls back, but every fallback re-launches the Moonlight session, and a re-launch currently restarts the app (next paragraph).
 
+The player asks for H.264 by default (`browser.codec: h264`); `auto` lets moonlight-web negotiate HEVC or AV1, and a browser that cannot decode what it claimed (desktop Firefox and HEVC) makes it re-launch the session with H.264, which restarts the app (next paragraph).
+
+A client's `/cancel` ends its stream and never stops the app: clients send it after a launch they gave up on, before a fallback re-launch, and for Quit alike. The idle stop reclaims the app, and the hub's Stop button is explicit.
+
 **Resuming restarts the app.** A Moonlight resume (a client reconnecting, a transport fallback) brings new stream keys, and the hub can only give Wolf new keys by stopping its session and adding one; Wolf then rebuilds its compositor, the app loses its Wayland display and its container restarts into the new one. Wolf's own resume keeps the compositor, but only through its HTTPS API; a session resume on the Wolf API would remove this limitation.
 
 moonlight-web is one Moonlight client for every browser. Its pairing is bound to whoever pressed Play last, so two different hub users cannot play through it at the same time; the same user on several devices can.

@@ -576,21 +576,29 @@ func (s *Service) Cancel(ctx context.Context, user *store.User) error {
 	if err != nil || cur == nil {
 		return err
 	}
-	// A client that gave up waiting for /launch sends /cancel right after.
-	// Stopping now would throw away the pod (and the node that just woke
-	// up) moments before it is usable, so an app that has no stream yet
-	// (starting, or warm and waiting) keeps going; the idle stop reclaims
-	// it if nobody comes back. Quitting a streaming app is what /cancel
-	// means otherwise, and that still stops it.
-	if cur.State == store.StateStarting || cur.WolfSessionID == "" {
-		_ = s.Store.Events().Add(ctx, cur.ID, "moonlight", "cancel before any stream ignored; the app keeps running")
+	// /cancel ends the client's stream, never the app. Clients send it for
+	// every reason: a launch they gave up waiting for, a codec or transport
+	// fallback a second before they re-launch, and the user's Quit. Stopping
+	// the pod on any of those throws away the node that just woke up or the
+	// game that is running; the idle stop reclaims an app nobody comes back
+	// to, and the hub's Stop button is explicit. The stream parameters are
+	// cleared so the app shows as ready, not streaming; Wolf's session stays
+	// until the next launch replaces it.
+	if cur.State == store.StateStarting {
+		_ = s.Store.Events().Add(ctx, cur.ID, "moonlight", "cancel while starting ignored; the app keeps starting")
 		return nil
 	}
-	_, err = s.stop(ctx, cur, "moonlight")
-	if errors.Is(err, ErrInvalidTransition) {
-		return nil
+	if cur.Stream != nil {
+		if _, err := s.Store.Apps().SetStream(ctx, cur.ID, nil); err != nil {
+			return err
+		}
+		_ = s.Store.Events().Add(ctx, cur.ID, "moonlight", "stream ended by the client; the app keeps running")
+		s.Orch.Notify(cur.ID)
+		if updated, err := s.Store.Apps().Get(ctx, cur.ID); err == nil {
+			s.publish(ctx, updated)
+		}
 	}
-	return err
+	return nil
 }
 
 // ---- notifier ----
