@@ -11,6 +11,8 @@ export function NewApp(props: { user: User; onLogout: () => void; edit?: string 
   const [presets, setPresets] = useState<Preset[]>([]);
   const [defaults, setDefaults] = useState<Defaults | null>(null);
   const [name, setName] = useState("");
+  // The name follows the chosen preset until the user types one.
+  const [nameTyped, setNameTyped] = useState(false);
   const [preset, setPreset] = useState("steam");
   const [image, setImage] = useState("");
   const [iconUrl, setIconUrl] = useState("");
@@ -109,7 +111,14 @@ export function NewApp(props: { user: User; onLogout: () => void; edit?: string 
       {editable === false && <div class="error">Stop the app before editing it.</div>}
       <form class="card" onSubmit={submit}>
         <label>Name (shown in Moonlight)</label>
-        {input(name, setName, "Steam")}
+        <input
+          value={name}
+          placeholder="Steam"
+          onInput={(e) => {
+            setName((e.target as HTMLInputElement).value);
+            setNameTyped(true);
+          }}
+        />
         <label>Preset</label>
         <div class="presets">
           {presets.map((p) => (
@@ -119,7 +128,7 @@ export function NewApp(props: { user: User; onLogout: () => void; edit?: string 
               class={`preset-card ${preset === p.key ? "selected" : ""}`}
               onClick={() => {
                 setPreset(p.key);
-                if (!editing && !name) setName(p.custom ? "" : p.title);
+                if (!editing && !nameTyped) setName(p.custom ? "" : p.title);
               }}
             >
               {p.icon_url ? <img src={p.icon_url} alt="" /> : <span class="icon placeholder">?</span>}
