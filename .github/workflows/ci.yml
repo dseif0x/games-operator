@@ -80,4 +80,11 @@ jobs:
       - run: helm dependency update charts/games-operator
       - run: helm lint charts/games-operator --strict
       - name: template renders
-        run: helm template hub charts/games-operator --set postgresql.enabled=false --set database.url=postgres://x --set browser.enabled=true >/dev/null
+        run: |
+          set -euo pipefail
+          # Render, then parse the result with kustomize: helm-controller post-renders through it,
+          # and its YAML parser is strict (duplicate keys fail) where helm's is not.
+          dir=$(mktemp -d)
+          helm template hub charts/games-operator --set postgresql.enabled=false --set database.url=postgres://x --set browser.enabled=true > "$dir/all.yaml"
+          printf 'resources:\n  - all.yaml\n' > "$dir/kustomization.yaml"
+          kubectl kustomize "$dir" >/dev/null

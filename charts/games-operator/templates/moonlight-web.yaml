@@ -8,8 +8,7 @@ kind: Deployment
 metadata:
   name: {{ include "games-operator.fullname" . }}-moonlight-web
   labels:
-    {{- include "games-operator.labels" . | nindent 4 }}
-    app.kubernetes.io/component: moonlight-web
+    {{- include "games-operator.browserLabels" . | nindent 4 }}
 spec:
   replicas: 1
   strategy:
@@ -70,8 +69,7 @@ kind: PersistentVolumeClaim
 metadata:
   name: {{ include "games-operator.fullname" . }}-moonlight-web
   labels:
-    {{- include "games-operator.labels" . | nindent 4 }}
-    app.kubernetes.io/component: moonlight-web
+    {{- include "games-operator.browserLabels" . | nindent 4 }}
   annotations:
     helm.sh/resource-policy: keep
 spec:
@@ -88,8 +86,7 @@ kind: Service
 metadata:
   name: {{ include "games-operator.fullname" . }}-moonlight-web
   labels:
-    {{- include "games-operator.labels" . | nindent 4 }}
-    app.kubernetes.io/component: moonlight-web
+    {{- include "games-operator.browserLabels" . | nindent 4 }}
 spec:
   type: ClusterIP
   ports:

@@ -34,6 +34,16 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 app.kubernetes.io/component: hub
 {{- end }}
 
+{{/* Labels for the moonlight-web objects: the common set with the browser component. */}}
+{{- define "games-operator.browserLabels" -}}
+helm.sh/chart: {{ include "games-operator.chart" . }}
+{{ include "games-operator.browserSelectorLabels" . }}
+{{- if .Chart.AppVersion }}
+app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
+{{- end }}
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+{{- end }}
+
 {{- define "games-operator.browserSelectorLabels" -}}
 app.kubernetes.io/name: {{ include "games-operator.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
