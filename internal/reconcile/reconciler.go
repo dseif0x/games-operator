@@ -54,10 +54,20 @@ type WolfClientFunc func(baseURL, token string) WolfAPI
 
 // WolfAPI is the subset of the Wolf client the reconciler uses.
 type WolfAPI interface {
-	AddSession(ctx context.Context, s wolf.Session) (string, error)
+	Apps(ctx context.Context) ([]wolf.App, error)
 	ListSessions(ctx context.Context) ([]wolf.RunningSession, error)
 	StopSession(ctx context.Context, sessionID string) error
 }
+
+// WolfMoonlight is Wolf's own Moonlight HTTPS side, which the hub uses as
+// a paired client to launch and resume streams (see wolf.Moonlight).
+type WolfMoonlight interface {
+	Launch(ctx context.Context, p wolf.LaunchParams) (string, error)
+	Cancel(ctx context.Context) error
+}
+
+// MoonlightClientFunc builds the HTTPS client for one Wolf.
+type MoonlightClientFunc func(baseURL string) WolfMoonlight
 
 // Reconciler is a level-triggered controller for app objects.
 type Reconciler struct {
@@ -71,6 +81,7 @@ type Reconciler struct {
 	interval time.Duration
 	now      func() time.Time
 	wolfFor  WolfClientFunc
+	mlFor    MoonlightClientFunc
 	http     *http.Client
 
 	startOnce sync.Once
@@ -87,6 +98,9 @@ func New(cfg Config, st store.Store, cs kubernetes.Interface, inf *k8s.Informers
 		interval: interval, now: time.Now,
 		wolfFor: func(baseURL, token string) WolfAPI { return wolf.NewClient(baseURL, token) },
 		http:    &http.Client{Timeout: 5 * time.Second},
+	}
+	r.mlFor = func(baseURL string) WolfMoonlight {
+		return wolf.NewMoonlight(baseURL, "games-operator", r.cfg.ClientCert)
 	}
 	if r.interval == 0 {
 		r.interval = 30 * time.Second
@@ -304,7 +318,10 @@ func (r *Reconciler) reconcileStarting(ctx context.Context, app *store.App, o ob
 		if err != nil {
 			return err
 		}
-		wolfCfg, err := wolf.GenerateConfig(wolf.ConfigOptions{Hostname: r.cfg.MoonlightHostname, UUID: app.ID, AppTitle: app.Name, RenderNode: r.cfg.RenderNode})
+		wolfCfg, err := wolf.GenerateConfig(wolf.ConfigOptions{
+			Hostname: r.cfg.MoonlightHostname, UUID: app.ID, AppTitle: app.Name, RenderNode: r.cfg.RenderNode,
+			ClientCertPEM: r.cfg.ClientCertPEM, AppStateFolder: app.ID,
+		})
 		if err != nil {
 			return r.fail(ctx, app, "wolf config: "+err.Error())
 		}
@@ -402,6 +419,7 @@ func (r *Reconciler) ensureStream(ctx context.Context, app *store.App, o observe
 		}
 		return nil
 	}
+	// The stream ports are reachable once the Service has its address.
 	ip := r.cfg.LBIP
 	if ip == "" {
 		ip = ServiceIP(o.svc)
@@ -428,38 +446,38 @@ func (r *Reconciler) ensureStream(ctx context.Context, app *store.App, o observe
 	if err != nil {
 		return err
 	}
-	// A re-key (resume) of a running app: drop Wolf's previous session
-	// first so the new keys are the only ones.
-	if sessions, err := client.ListSessions(ctx); err == nil {
-		for _, s := range sessions {
-			if s.ClientID != "" {
-				_ = client.StopSession(ctx, s.ClientID)
-			}
+	// The stream is started through Wolf's own Moonlight HTTPS side, with
+	// the hub as the paired client: a first launch creates the session, a
+	// launch for a client that already has one is a resume, and Wolf then
+	// keeps the compositor and the input devices, so the app survives the
+	// client's new keys. The RTSP URL Wolf answers carries a per-session
+	// marker as its host; the client sends it in every RTSP request, which
+	// is how Wolf finds the session behind our shared address.
+	apps, err := client.Apps(ctx)
+	if err != nil || len(apps) == 0 {
+		if err == nil {
+			err = errors.New("wolf lists no app")
 		}
-	}
-	ports := Ports(r.cfg.StreamPortBase, app.Slot)
-	channels := 2
-	if app.Stream.Surround != 0 && app.Stream.Surround != 196610 {
-		channels = app.Stream.Surround & 0xff
-		if channels <= 0 || channels > 8 {
-			channels = 2
+		if r.timedOut(app) {
+			return r.fail(ctx, app, "wolf: "+err.Error())
 		}
+		return fmt.Errorf("wolf apps: %w", err)
 	}
-	id, err := client.AddSession(ctx, wolf.Session{
-		ClientIP: app.Stream.ClientIP, AESKey: app.Stream.AESKey, AESIV: app.Stream.AESIV,
-		// Moonlight sends this host back in every RTSP request; Wolf uses
-		// it to find the session.
-		RTSPFakeIP: ip,
-		VideoWidth: app.Stream.Width, VideoHeight: app.Stream.Height, VideoRefreshRate: app.Stream.FPS,
-		AudioChannelCount: channels,
+	ml := r.mlFor(fmt.Sprintf("https://%s:%d", o.pod.Status.PodIP, r.cfg.WolfHTTPSPort))
+	url, err := ml.Launch(ctx, wolf.LaunchParams{
+		AppID: apps[0].ID, AESKey: app.Stream.AESKey, AESIV: app.Stream.AESIV,
+		Width: app.Stream.Width, Height: app.Stream.Height, FPS: app.Stream.FPS, Surround: app.Stream.Surround,
 	})
 	if err != nil {
 		if r.timedOut(app) {
 			return r.fail(ctx, app, "wolf: "+err.Error())
 		}
-		return fmt.Errorf("wolf add session: %w", err)
+		return fmt.Errorf("wolf launch: %w", err)
 	}
-	url := fmt.Sprintf("rtsp://%s:%d", ip, ports.RTSP)
+	id := "moonlight"
+	if sessions, err := client.ListSessions(ctx); err == nil && len(sessions) > 0 {
+		id = sessions[len(sessions)-1].ClientID
+	}
 	updated, err := r.store.Apps().SetRuntime(ctx, app.ID, id, url)
 	if err != nil {
 		return err

@@ -98,8 +98,25 @@ func verifySignature(pub any, message, signature []byte) error {
 // a self-signed RSA certificate on first start. Clients pin this
 // certificate when they pair, so the directory must persist.
 func LoadOrCreateCert(dir string) (tls.Certificate, error) {
-	certPath := filepath.Join(dir, "cert.pem")
-	keyPath := filepath.Join(dir, "key.pem")
+	return loadOrCreate(dir, filepath.Join(dir, "cert.pem"), filepath.Join(dir, "key.pem"))
+}
+
+// LoadOrCreateClientCert loads the certificate the hub presents to Wolf
+// as a Moonlight client (every app pod's Wolf config lists it as a paired
+// client), creating it on first start.
+func LoadOrCreateClientCert(dir string) (tls.Certificate, error) {
+	return loadOrCreate(dir, filepath.Join(dir, "client-cert.pem"), filepath.Join(dir, "client-key.pem"))
+}
+
+// CertPEM returns the leaf certificate PEM-encoded.
+func CertPEM(c tls.Certificate) string {
+	if len(c.Certificate) == 0 {
+		return ""
+	}
+	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: c.Certificate[0]}))
+}
+
+func loadOrCreate(dir, certPath, keyPath string) (tls.Certificate, error) {
 	certPEM, err := os.ReadFile(certPath)
 	keyPEM, kerr := os.ReadFile(keyPath)
 	if err != nil || kerr != nil {

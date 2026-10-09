@@ -40,7 +40,7 @@ An app is **stopped** until a Moonlight client launches it, or a user starts it 
 ```
 stopped ─launch/start→ starting ─pod ready (+stream up)→ running ─stop/cancel/idle→ stopping ─objects gone→ stopped
 
-A `/cancel` during `starting` does not stop the app: clients send it when `/launch` outruns their timeout, and the pod is seconds from usable. A retried `/launch` during `starting` replaces the pending stream keys.
+A `/cancel` never stops the app: clients send it when `/launch` outruns their timeout, before a fallback re-launch and for Quit alike; it only ends the stream parameters. A retried `/launch` during `starting` replaces the pending stream keys. On a running app a launch with new keys is a Wolf resume (the hub calls Wolf's own HTTPS `/launch` as a paired client, and Wolf keeps the compositor and devices), so reconnects and fallbacks never restart the app.
                     │                    │
                     └──timeout/error─────┴──→ failed (pod kept for logs; stop or delete clears it)
 any ─delete→ deleting → row deleted

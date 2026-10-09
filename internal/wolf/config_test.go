@@ -8,15 +8,18 @@ import (
 )
 
 func TestGenerateConfig(t *testing.T) {
-	b, err := GenerateConfig(ConfigOptions{Hostname: "games-operator", UUID: "u", AppTitle: "Steam", RenderNode: "/dev/dri/renderD128"})
+	b, err := GenerateConfig(ConfigOptions{Hostname: "games-operator", UUID: "u", AppTitle: "Steam", RenderNode: "/dev/dri/renderD128", ClientCertPEM: "-----BEGIN CERTIFICATE-----\nAAA\n-----END CERTIFICATE-----\n"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	var cfg struct {
 		Hostname      string `toml:"hostname"`
 		ConfigVersion int    `toml:"config_version"`
-		PairedClients []any  `toml:"paired_clients"`
-		Profiles      []struct {
+		PairedClients []struct {
+			ClientCert     string `toml:"client_cert"`
+			AppStateFolder string `toml:"app_state_folder"`
+		} `toml:"paired_clients"`
+		Profiles []struct {
 			ID   string `toml:"id"`
 			Apps []struct {
 				Title      string         `toml:"title"`
@@ -29,8 +32,11 @@ func TestGenerateConfig(t *testing.T) {
 	if err := toml.Unmarshal(b, &cfg); err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Hostname != "games-operator" || cfg.ConfigVersion != 7 || len(cfg.PairedClients) != 0 {
+	if cfg.Hostname != "games-operator" || cfg.ConfigVersion != 7 {
 		t.Fatalf("%+v", cfg)
+	}
+	if len(cfg.PairedClients) != 1 || !strings.Contains(cfg.PairedClients[0].ClientCert, "BEGIN CERTIFICATE") || cfg.PairedClients[0].AppStateFolder != "u" {
+		t.Fatalf("paired client: %+v", cfg.PairedClients)
 	}
 	if len(cfg.Profiles) != 1 || cfg.Profiles[0].ID != "moonlight-profile-id" || len(cfg.Profiles[0].Apps) != 1 {
 		t.Fatalf("profiles: %+v", cfg.Profiles)

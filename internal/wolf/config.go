@@ -23,6 +23,13 @@ type ConfigOptions struct {
 	AppTitle string
 	// RenderNode pins the DRI render node; empty lets Wolf pick.
 	RenderNode string
+	// ClientCertPEM is the hub's Moonlight client certificate. Listed as a
+	// paired client, it lets the hub call Wolf's own HTTPS launch, resume
+	// and cancel: Wolf then keeps the compositor and devices across a
+	// resume, which its API cannot do. AppStateFolder names the client's
+	// state directory under Wolf's data folder (the app id).
+	ClientCertPEM  string
+	AppStateFolder string
 }
 
 // GenerateConfig renders the config.toml for a session pod: Wolf's default
@@ -50,6 +57,13 @@ func GenerateConfig(o ConfigOptions) ([]byte, error) {
 	cfg["hostname"] = o.Hostname
 	cfg["uuid"] = o.UUID
 	cfg["paired_clients"] = []any{}
+	if o.ClientCertPEM != "" {
+		folder := o.AppStateFolder
+		if folder == "" {
+			folder = o.UUID
+		}
+		cfg["paired_clients"] = []any{map[string]any{"client_cert": o.ClientCertPEM, "app_state_folder": folder}}
+	}
 	cfg["profiles"] = []any{map[string]any{"id": "moonlight-profile-id", "apps": []any{app}}}
 	out, err := toml.Marshal(cfg)
 	if err != nil {

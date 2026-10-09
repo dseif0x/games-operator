@@ -176,10 +176,20 @@ func TestPodCrashing(t *testing.T) {
 	if PodCrashing(nil) || PodCrashing(waiting("ContainerCreating")) || PodCrashing(waiting("PodInitializing")) {
 		t.Fatal("benign waits are not crashes")
 	}
-	for _, reason := range []string{"CrashLoopBackOff", "StartError", "RunContainerError", "ImagePullBackOff"} {
+	for _, reason := range []string{"StartError", "RunContainerError", "ImagePullBackOff"} {
 		if !PodCrashing(waiting(reason)) {
 			t.Fatalf("%s must count as crashing", reason)
 		}
+	}
+	// A crash loop after clean exits (the compositor rebuild) is not a crash; after a failure it is.
+	loop := waiting("CrashLoopBackOff")
+	loop.Status.ContainerStatuses[0].LastTerminationState = corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 0}}
+	if PodCrashing(loop) {
+		t.Fatal("a backed-off container that exited cleanly is not crashing")
+	}
+	loop.Status.ContainerStatuses[0].LastTerminationState.Terminated.ExitCode = 128
+	if !PodCrashing(loop) {
+		t.Fatal("a backed-off container that failed is crashing")
 	}
 	running := &corev1.Pod{Status: corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{{Name: "app", State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}}}}}}
 	if PodCrashing(running) {

@@ -4,6 +4,7 @@
 package reconcile
 
 import (
+	"crypto/tls"
 	"fmt"
 	"sort"
 	"strconv"
@@ -37,6 +38,13 @@ type Config struct {
 	TimeZone        string
 	// MoonlightHostname is written into Wolf's config.
 	MoonlightHostname string
+	// ClientCert is the hub's Moonlight client certificate, listed as a
+	// paired client in every Wolf config (ClientCertPEM) and presented to
+	// Wolf's HTTPS endpoints for launch, resume and cancel.
+	ClientCert    tls.Certificate
+	ClientCertPEM string
+	// WolfHTTPSPort is Wolf's Moonlight HTTPS port inside the app pod.
+	WolfHTTPSPort int
 
 	DefaultStorageClass string
 	DefaultPVCSize      string
@@ -73,6 +81,9 @@ func (c Config) Defaults() Config {
 	}
 	if c.FailedPodGrace == 0 {
 		c.FailedPodGrace = 5 * time.Minute
+	}
+	if c.WolfHTTPSPort == 0 {
+		c.WolfHTTPSPort = 47984
 	}
 	if c.ImagePullPolicy == "" {
 		c.ImagePullPolicy = "IfNotPresent"
@@ -591,8 +602,15 @@ func PodCrashing(pod *corev1.Pod) bool {
 			continue
 		}
 		switch cs.State.Waiting.Reason {
-		case "CrashLoopBackOff", "StartError", "RunContainerError", "CreateContainerError", "CreateContainerConfigError", "ImagePullBackOff", "ErrImagePull", "InvalidImageName":
+		case "StartError", "RunContainerError", "CreateContainerError", "CreateContainerConfigError", "ImagePullBackOff", "ErrImagePull", "InvalidImageName":
 			return true
+		case "CrashLoopBackOff":
+			// The app container exits cleanly when Wolf rebuilds its
+			// compositor and is backed off before its restart; only a
+			// container that failed counts.
+			if t := cs.LastTerminationState.Terminated; t != nil && t.ExitCode != 0 {
+				return true
+			}
 		}
 	}
 	return false

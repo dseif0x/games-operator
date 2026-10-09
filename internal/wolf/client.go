@@ -78,6 +78,13 @@ type response struct {
 	Error     string           `json:"error"`
 	SessionID string           `json:"session_id"`
 	Sessions  []RunningSession `json:"sessions"`
+	Apps      []App            `json:"apps"`
+}
+
+// App is an entry of Wolf's app list.
+type App struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
 }
 
 func (c *Client) do(ctx context.Context, method, path string, body any) (*response, error) {
@@ -128,6 +135,15 @@ func (c *Client) AddSession(ctx context.Context, s Session) (string, error) {
 		return "", err
 	}
 	return out.SessionID, nil
+}
+
+// Apps returns the apps Wolf loaded from its config (one, for us).
+func (c *Client) Apps(ctx context.Context) ([]App, error) {
+	out, err := c.do(ctx, http.MethodGet, "/api/v1/apps", nil)
+	if err != nil {
+		return nil, err
+	}
+	return out.Apps, nil
 }
 
 // ListSessions returns the sessions Wolf knows about.

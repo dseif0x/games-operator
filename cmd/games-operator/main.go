@@ -110,6 +110,12 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("moonlight certificate: %w", err)
 	}
+	// The hub's own client certificate, with which it is a paired client
+	// of every Wolf and drives their streams over Wolf's HTTPS.
+	clientCert, err := moonlight.LoadOrCreateClientCert(cfg.CertDir)
+	if err != nil {
+		return fmt.Errorf("wolf client certificate: %w", err)
+	}
 
 	// Kubernetes.
 	cs, err := k8s.NewClientset(cfg.Kubeconfig)
@@ -127,6 +133,7 @@ func run() error {
 		Namespace: cfg.Namespace, WolfImage: cfg.WolfImage, InitImage: cfg.InitImage, BridgeImage: cfg.BridgeImageRef(),
 		ImagePullPolicy: cfg.ImagePullPolicy, RuntimeClass: cfg.RuntimeClass, WolfGPURequest: cfg.WolfGPURequest, UinputResource: cfg.UinputResource,
 		RenderNode: cfg.RenderNode, TimeZone: cfg.TimeZone, MoonlightHostname: cfg.MoonlightHostname,
+		ClientCert: clientCert, ClientCertPEM: moonlight.CertPEM(clientCert),
 		DefaultStorageClass: cfg.DefaultStorageClass, DefaultPVCSize: cfg.DefaultPVCSize, DefaultResources: cfg.DefaultResources, MaxResources: cfg.MaxResources,
 		NodeSelector: cfg.NodeSelector, Tolerations: cfg.Tolerations, ExtraEnv: cfg.ExtraEnv,
 		LBSharingKey: cfg.LBSharingKey, LBIP: cfg.LBIP, StreamPortBase: cfg.StreamPortBase, MaxConcurrent: cfg.MaxConcurrent,
