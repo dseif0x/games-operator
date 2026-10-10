@@ -1,8 +1,10 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"net/http/cookiejar"
+	"net/http/httptest"
 	"testing"
 )
 
@@ -117,5 +119,42 @@ func TestAdminAndUsers(t *testing.T) {
 	}
 	if code, out := admin.do("GET", "/api/v1/admin/apps", nil); code != 200 || len(out["apps"].([]any)) != 0 {
 		t.Fatalf("bob's apps go with bob: %v", out)
+	}
+}
+
+func TestBrowserBackendIsTheUsersOwn(t *testing.T) {
+	srv, c := newServerAt(t, "", nil)
+	admin := login(t, srv.URL, c.server, "admin", "secret")
+	// A request as the proxy sees it: the hub's own session cookie.
+	user, err := c.server.Store.Users().GetByUsername(context.Background(), "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	c.server.Cookies.Issue(rec, user)
+	req, _ := http.NewRequest("POST", srv.URL+"/play/api/hosts/x/backend", nil)
+	req.Host = "games.example.com"
+	for _, ck := range rec.Result().Cookies() {
+		req.AddCookie(ck)
+	}
+	apiURL, tok, err := admin.server.BrowserBackend(req)
+	if err != nil || apiURL != "https://games.example.com/wolf" || tok == "" {
+		t.Fatalf("backend: %q %q %v", apiURL, tok, err)
+	}
+	// The token opens the Wolf-compatible API as that user.
+	wreq, _ := http.NewRequest("GET", srv.URL+"/wolf/api/v1/clients", nil)
+	wreq.Host = "games.example.com"
+	wreq.Header.Set("Authorization", "Bearer "+tok)
+	res, err := http.DefaultClient.Do(wreq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != 200 {
+		t.Fatalf("token on the wolf api: %d", res.StatusCode)
+	}
+	// No hub session, no backend.
+	if _, _, err := admin.server.BrowserBackend(&http.Request{Header: http.Header{}}); err == nil {
+		t.Fatal("a request without a hub session must not get a token")
 	}
 }

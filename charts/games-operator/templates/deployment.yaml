@@ -93,6 +93,10 @@ spec:
               value: {{ if .Values.devices.enabled }}"games-operator.io/input"{{ else }}""{{ end }}
             - name: GAMES_OPERATOR_APPS_PRIVILEGED
               value: {{ .Values.apps.privileged | quote }}
+            {{- if .Values.devices.enabled }}
+            - name: GAMES_OPERATOR_DEVICES_IMAGE
+              value: "{{ .Values.devices.image.repository }}:{{ .Values.devices.image.tag | default .Chart.AppVersion }}"
+            {{- end }}
             - name: GAMES_OPERATOR_APPS_USER_NAMESPACE
               value: {{ .Values.apps.userNamespace | quote }}
             - name: GAMES_OPERATOR_PROTON_SECCOMP

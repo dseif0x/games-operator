@@ -39,7 +39,10 @@ type Options struct {
 	// LoginPath is where a browser without a login is sent (the hub's
 	// login page, with ?next= back to the player).
 	LoginPath string
-	Log       *slog.Logger
+	// Rules limits what a logged-in browser may ask moonlight-web for;
+	// nil lets everything through.
+	Rules *Rules
+	Log   *slog.Logger
 }
 
 // New returns the proxy handler.
@@ -97,6 +100,27 @@ func New(o Options) http.Handler {
 			w.WriteHeader(http.StatusUnauthorized)
 			_, _ = w.Write([]byte(`{"error":"authentication_required"}`))
 			return
+		}
+		if o.Rules != nil {
+			path := strip(r.URL.Path, prefix)
+			if !o.Rules.allowed(r.Method, path) {
+				log.Info("moonlight-web route closed", "method", r.Method, "path", path)
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = w.Write([]byte(`{"status":"error","error":"not available in the embedded player"}`))
+				return
+			}
+			in := r.Clone(r.Context())
+			in.URL.Path = path
+			if err := o.Rules.rewrite(in); err != nil {
+				log.Warn("moonlight-web request not rewritten", "path", path, "err", err)
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusInternalServerError)
+				_, _ = w.Write([]byte(`{"status":"error","error":"internal error"}`))
+				return
+			}
+			in.URL.Path = r.URL.Path
+			r = in
 		}
 		proxy.ServeHTTP(w, r)
 	})

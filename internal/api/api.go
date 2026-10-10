@@ -542,6 +542,26 @@ type playJSON struct {
 	} `json:"backend"`
 }
 
+// BrowserBackend is what the proxy puts into moonlight-web's host backend
+// settings on a browser's behalf: the hub's Wolf-compatible API and a
+// fresh token bound to the browser's hub user. The browser's own request
+// body is never used, so no user can point the shared player at another
+// server or at another user's token.
+func (s *Server) BrowserBackend(r *http.Request) (string, string, error) {
+	p, err := s.Cookies.Read(r)
+	if err != nil {
+		return "", "", err
+	}
+	tok, err := auth.NewToken()
+	if err != nil {
+		return "", "", err
+	}
+	if err := s.Store.Users().SetBrowserTokenHash(r.Context(), p.User.ID, auth.HashToken(tok)); err != nil {
+		return "", "", err
+	}
+	return s.Cfg.PublicURL.String() + "/wolf", tok, nil
+}
+
 // playApp prepares "Play in browser": it starts the app if needed and
 // mints the user's browser token (what moonlight-web pairs with).
 func (s *Server) playApp(w http.ResponseWriter, r *http.Request) {

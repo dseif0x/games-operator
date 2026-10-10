@@ -141,6 +141,10 @@ type Config struct {
 	// AppsPrivileged runs the Wolf and app containers privileged with the
 	// node's /dev, the way it was before the device plugin.
 	AppsPrivileged bool
+	// DevicesImage is the device plugin image the chart deploys; the hub
+	// replaces plugin pods running another one once their node is up
+	// (the DaemonSet updates OnDelete). Empty: no plugin.
+	DevicesImage string
 	// AppsUserNamespace runs app pods in their own user namespace
 	// (hostUsers: false): root in the pod is an unprivileged node user, and
 	// the app container gets an unmasked /proc for Proton's sandbox.
@@ -313,6 +317,7 @@ func load(get lookup) (*Config, error) {
 		AppsPrivileged:      boolean("APPS_PRIVILEGED", false),
 		ProtonSeccomp:       str("PROTON_SECCOMP", ""),
 		AppsUserNamespace:   boolean("APPS_USER_NAMESPACE", false),
+		DevicesImage:        str("DEVICES_IMAGE", ""),
 		DefaultMaxStorage:   str("DEFAULT_MAX_STORAGE", ""),
 		LogLevel:            str("LOG_LEVEL", "info"),
 		ReconcileInterval:   dur("RECONCILE_INTERVAL", 30*time.Second),

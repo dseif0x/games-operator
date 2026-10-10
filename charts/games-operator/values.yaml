@@ -110,6 +110,10 @@ apps:
     enabled: true
     # -- The cluster's pod and service CIDRs, which game pods may not reach
     clusterCIDRs: ["10.42.0.0/16", "10.43.0.0/16"]
+    # -- LAN ranges game pods may not reach either (e.g. ["10.13.0.0/16"]).
+    # Streams still work: Moonlight clients open every flow, and replies
+    # to an open flow pass. Empty = the LAN is reachable.
+    lanCIDRs: []
     dns:
       # -- Namespace and pod labels of the cluster DNS
       namespace: kube-system
@@ -203,6 +207,10 @@ browser:
     limits:
       cpu: "4"
       memory: 2Gi
+  networkPolicy:
+    # -- Create the NetworkPolicy for the player: reached by the hub only,
+    # reaches DNS and addresses outside the cluster only
+    enabled: true
 
 auth:
   # -- argon2id hash for the admin user (`games-operator hash-password`); if empty a random password is generated
