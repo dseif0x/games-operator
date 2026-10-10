@@ -1,0 +1,37 @@
+{{- if .Values.apps.networkPolicy.enabled }}
+# Game pods reach DNS and the world outside the cluster, nothing inside it:
+# a game has no business with the hub's API, the database or other pods.
+# Ingress stays open: Moonlight clients come in through the LoadBalancer
+# and the hub talks to the bridge and Wolf.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "games-operator.fullname" . }}-apps
+  labels:
+    {{- include "games-operator.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: games-operator-app
+      app.kubernetes.io/managed-by: games-operator
+  policyTypes: ["Egress"]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.apps.networkPolicy.dns.namespace }}
+          podSelector:
+            matchLabels:
+              {{- toYaml .Values.apps.networkPolicy.dns.podLabels | nindent 14 }}
+      ports:
+        - { port: 53, protocol: UDP }
+        - { port: 53, protocol: TCP }
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              {{- toYaml .Values.apps.networkPolicy.clusterCIDRs | nindent 14 }}
+    {{- with .Values.apps.networkPolicy.extraEgress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}

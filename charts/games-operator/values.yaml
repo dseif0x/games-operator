@@ -87,6 +87,21 @@ apps:
   extraEnv: {}
   # -- Stop a running app this long after its last stream ended (0 = never)
   idleStopAfter: 15m
+  # Game pods may reach DNS and the world outside the cluster, nothing
+  # inside it (the hub's API, the database, other pods). Ingress stays
+  # open for Moonlight clients and the hub. Needs a CNI that enforces
+  # NetworkPolicy (k3s does out of the box).
+  networkPolicy:
+    # -- Create the NetworkPolicy for game pods
+    enabled: true
+    # -- The cluster's pod and service CIDRs, which game pods may not reach
+    clusterCIDRs: ["10.42.0.0/16", "10.43.0.0/16"]
+    dns:
+      # -- Namespace and pod labels of the cluster DNS
+      namespace: kube-system
+      podLabels: { k8s-app: kube-dns }
+    # -- Extra egress rules (NetworkPolicy egress entries), e.g. an in-cluster game cache
+    extraEgress: []
 
 # The device plugin: a DaemonSet on the game nodes that writes a CDI spec
 # for Wolf's virtual input devices (uinput, uhid, the input and hidraw
