@@ -39,7 +39,8 @@ func run() error {
 	socketDir := envOr("DEVICES_SOCKET_DIR", "/var/lib/kubelet/device-plugins")
 	procDevices := envOr("DEVICES_PROC_DEVICES", "/proc/devices")
 	modules := envOr("DEVICES_MODPROBE", "")
-	log.Info("games-operator-devices starting", "version", version, "cdi_dir", cdiDir, "modprobe", modules)
+	sysctls := envOr("DEVICES_SYSCTL", "")
+	log.Info("games-operator-devices starting", "version", version, "cdi_dir", cdiDir, "modprobe", modules, "sysctl", sysctls)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -53,6 +54,21 @@ func run() error {
 		cmd := exec.CommandContext(ctx, "nsenter", "-t", "1", "-m", "-u", "-i", "-n", "-p", "--", "modprobe", m) //nolint:gosec // fixed argv, names from the chart
 		if out, err := cmd.CombinedOutput(); err != nil {
 			log.Warn("modprobe failed", "module", m, "err", err, "out", strings.TrimSpace(string(out)))
+		}
+	}
+
+	// Node settings the game pods need (kernel.apparmor_restrict_unprivileged_userns=0
+	// for Proton's sandbox without SYS_ADMIN), applied through the host's
+	// namespaces like the modules.
+	for _, kv := range strings.Split(sysctls, ",") {
+		if kv = strings.TrimSpace(kv); kv == "" {
+			continue
+		}
+		cmd := exec.CommandContext(ctx, "nsenter", "-t", "1", "-m", "-u", "-i", "-n", "-p", "--", "sysctl", "-w", kv) //nolint:gosec // fixed argv, settings from the chart
+		if out, err := cmd.CombinedOutput(); err != nil {
+			log.Warn("sysctl failed", "setting", kv, "err", err, "out", strings.TrimSpace(string(out)))
+		} else {
+			log.Info("sysctl applied", "setting", kv)
 		}
 	}
 

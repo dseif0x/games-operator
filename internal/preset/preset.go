@@ -43,10 +43,16 @@ var commonEnv = map[string]string{
 }
 
 // steamCaps are what Steam (Proton, bubblewrap, gamescope) asks for.
-var steamCaps = []string{"SYS_ADMIN", "SYS_NICE", "SYS_PTRACE", "NET_RAW", "MKNOD", "NET_ADMIN", "SYS_RESOURCE"}
+// steamCaps: SYS_NICE for Steam's thread priorities, SYS_PTRACE for its
+// crash handler, SYS_RESOURCE for its limits. Proton's sandbox
+// (pressure-vessel, bwrap) runs in an unprivileged user namespace, which
+// needs no capability once the node allows it (devices.sysctls); SYS_ADMIN
+// is not granted any more, as it is a known way to root on the node.
+var steamCaps = []string{"SYS_NICE", "SYS_PTRACE", "SYS_RESOURCE"}
 
-// lightCaps are enough for launchers that spawn games themselves.
-var lightCaps = []string{"NET_RAW", "MKNOD", "NET_ADMIN"}
+// lightCaps are enough for launchers that spawn games themselves: the
+// runtime's default set (NET_RAW, MKNOD and friends) covers them.
+var lightCaps = []string{}
 
 var presets = map[string]Preset{
 	"steam": {
