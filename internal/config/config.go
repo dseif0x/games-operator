@@ -177,6 +177,12 @@ type Config struct {
 	// AdminPassword is a plaintext alternative to AdminPasswordHash, hashed
 	// at startup. The chart uses it for the generated password.
 	AdminPassword string
+	// DefaultMaxApps caps the apps (instances) a user may have; 0 means
+	// unlimited. An admin can override it per user.
+	DefaultMaxApps int
+	// DefaultMaxStorage caps the sum of a user's home volumes (a quantity
+	// such as 500Gi); empty means unlimited.
+	DefaultMaxStorage string
 	// IdleStopAfter stops a running app this long after its last active
 	// stream ended (0 = never).
 	IdleStopAfter time.Duration
@@ -290,6 +296,8 @@ func load(get lookup) (*Config, error) {
 		AdminPasswordHash:   str("ADMIN_PASSWORD_HASH", ""),
 		AdminPassword:       str("ADMIN_PASSWORD", ""),
 		IdleStopAfter:       dur("IDLE_STOP_AFTER", 15*time.Minute),
+		DefaultMaxApps:      integer("DEFAULT_MAX_APPS", 0),
+		DefaultMaxStorage:   str("DEFAULT_MAX_STORAGE", ""),
 		LogLevel:            str("LOG_LEVEL", "info"),
 		ReconcileInterval:   dur("RECONCILE_INTERVAL", 30*time.Second),
 		StatusPollEvery:     dur("STATUS_POLL_INTERVAL", 10*time.Second),

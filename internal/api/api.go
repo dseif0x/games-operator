@@ -125,6 +125,28 @@ func (s *Server) hubMux() *http.ServeMux {
 	authed.HandleFunc("DELETE /api/v1/pairings/{id}", s.deletePairing)
 	authed.HandleFunc("POST /api/v1/me/api-token", s.newAPIToken)
 	authed.HandleFunc("DELETE /api/v1/me/api-token", s.deleteAPIToken)
+	authed.HandleFunc("POST /api/v1/me/password", s.changePassword)
+	authed.HandleFunc("GET /api/v1/catalog", s.listCatalog)
+
+	// Admin routes: users, the catalog, every app.
+	admin := http.NewServeMux()
+	admin.HandleFunc("GET /api/v1/users", s.listUsers)
+	admin.HandleFunc("POST /api/v1/users", s.createUser)
+	admin.HandleFunc("PATCH /api/v1/users/{id}", s.updateUser)
+	admin.HandleFunc("DELETE /api/v1/users/{id}", s.deleteUser)
+	admin.HandleFunc("POST /api/v1/catalog", s.createTemplate)
+	admin.HandleFunc("PATCH /api/v1/catalog/{id}", s.updateTemplate)
+	admin.HandleFunc("DELETE /api/v1/catalog/{id}", s.deleteTemplate)
+	admin.HandleFunc("GET /api/v1/admin/apps", s.listAllApps)
+	admin.HandleFunc("GET /api/v1/admin/events", s.allAppEvents)
+	admin.HandleFunc("POST /api/v1/admin/apps/{id}/stop", s.stopAnyApp)
+	admin.HandleFunc("DELETE /api/v1/admin/apps/{id}", s.deleteAnyApp)
+	authed.Handle("/api/v1/users", s.requireAdmin(admin))
+	authed.Handle("/api/v1/users/", s.requireAdmin(admin))
+	authed.Handle("/api/v1/admin/", s.requireAdmin(admin))
+	authed.Handle("POST /api/v1/catalog", s.requireAdmin(admin))
+	authed.Handle("PATCH /api/v1/catalog/{id}", s.requireAdmin(admin))
+	authed.Handle("DELETE /api/v1/catalog/{id}", s.requireAdmin(admin))
 	mux.Handle("/api/v1/", s.requireAuth(s.requireCSRF(authed)))
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, _ *http.Request) { writeErr(w, http.StatusNotFound, "no such route") })
 
@@ -241,6 +263,17 @@ func (s *Server) requireAuth(next http.Handler) http.Handler {
 	})
 }
 
+// requireAdmin answers 403 for everyone but admins.
+func (s *Server) requireAdmin(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if p := principal(r); p == nil || !p.User.IsAdmin() {
+			writeErr(w, http.StatusForbidden, "admin only")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func (s *Server) requireCSRF(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
@@ -316,9 +349,16 @@ func decode(r *http.Request, v any) error {
 // mapErr turns service errors into HTTP responses.
 func (s *Server) mapErr(w http.ResponseWriter, err error) {
 	var ve *apps.ValidationError
+	var qe *apps.QuotaError
 	switch {
 	case errors.Is(err, store.ErrNotFound):
 		writeErr(w, http.StatusNotFound, "not found")
+	case errors.Is(err, store.ErrConflict):
+		writeErr(w, http.StatusConflict, "already exists")
+	case errors.Is(err, apps.ErrForbidden):
+		writeErr(w, http.StatusForbidden, err.Error())
+	case errors.As(err, &qe):
+		writeErr(w, http.StatusConflict, qe.Msg)
 	case errors.Is(err, apps.ErrInvalidTransition), errors.Is(err, apps.ErrNoSlot):
 		writeErr(w, http.StatusConflict, err.Error())
 	case errors.As(err, &ve):
@@ -334,7 +374,13 @@ func (s *Server) mapErr(w http.ResponseWriter, err error) {
 type userJSON struct {
 	ID       string `json:"id"`
 	Username string `json:"username"`
+	Role     string `json:"role"`
 	HasToken bool   `json:"has_api_token"`
+	Disabled bool   `json:"disabled"`
+	// Quota is the user's own override (nil fields = defaults); Usage the
+	// effective limits next to what the user has.
+	Quota store.Quota     `json:"quota"`
+	Usage *apps.QuotaView `json:"usage,omitempty"`
 }
 
 type meJSON struct {
@@ -343,7 +389,17 @@ type meJSON struct {
 }
 
 func (s *Server) userJSON(u *store.User) userJSON {
-	return userJSON{ID: u.ID, Username: u.Username, HasToken: u.APITokenHash != ""}
+	return userJSON{ID: u.ID, Username: u.Username, Role: u.Role, HasToken: u.APITokenHash != "", Disabled: u.Disabled, Quota: u.Quota}
+}
+
+// userWithUsage adds the quota and usage; a failure there leaves them out
+// rather than failing the login.
+func (s *Server) userWithUsage(ctx context.Context, u *store.User) userJSON {
+	j := s.userJSON(u)
+	if usage, err := s.Apps.Usage(ctx, u); err == nil {
+		j.Usage = &usage
+	}
+	return j
 }
 
 func (s *Server) login(w http.ResponseWriter, r *http.Request) {
@@ -372,7 +428,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	}
 	s.Limiter.Reset(ip)
 	p := s.Cookies.Issue(w, u)
-	writeJSON(w, http.StatusOK, meJSON{User: s.userJSON(u), CSRF: s.Cookies.CSRFToken(p)})
+	writeJSON(w, http.StatusOK, meJSON{User: s.userWithUsage(r.Context(), u), CSRF: s.Cookies.CSRFToken(p)})
 }
 
 func (s *Server) logout(w http.ResponseWriter, _ *http.Request) {
@@ -382,7 +438,7 @@ func (s *Server) logout(w http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 	p := principal(r)
-	writeJSON(w, http.StatusOK, meJSON{User: s.userJSON(p.User), CSRF: s.Cookies.CSRFToken(p)})
+	writeJSON(w, http.StatusOK, meJSON{User: s.userWithUsage(r.Context(), p.User), CSRF: s.Cookies.CSRFToken(p)})
 }
 
 // ---- apps ----
@@ -394,11 +450,24 @@ func (s *Server) listApps(w http.ResponseWriter, r *http.Request) {
 		s.mapErr(w, err)
 		return
 	}
+	writeJSON(w, http.StatusOK, map[string]any{"apps": s.views(r.Context(), list), "presets": s.Apps.Presets(), "defaults": s.Apps.Defaults})
+}
+
+// views renders apps with their catalog entry's name filled in.
+func (s *Server) views(ctx context.Context, list []*store.App) []apps.View {
+	names := map[string]string{}
+	if tpls, err := s.Store.Catalog().List(ctx); err == nil {
+		for _, t := range tpls {
+			names[t.ID] = t.Name
+		}
+	}
 	views := make([]apps.View, 0, len(list))
 	for _, a := range list {
-		views = append(views, s.Apps.View(a))
+		v := s.Apps.View(a)
+		v.TemplateName = names[a.TemplateID]
+		views = append(views, v)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"apps": views, "presets": s.Apps.Presets(), "defaults": s.Apps.Defaults})
+	return views
 }
 
 func (s *Server) createApp(w http.ResponseWriter, r *http.Request) {
@@ -473,9 +542,8 @@ type playJSON struct {
 	} `json:"backend"`
 }
 
-// playApp prepares "Play in browser": it starts the app if needed, mints
-// the user's browser token (what moonlight-web pairs with) and makes the
-// embedded moonlight-web's existing pairing follow this user.
+// playApp prepares "Play in browser": it starts the app if needed and
+// mints the user's browser token (what moonlight-web pairs with).
 func (s *Server) playApp(w http.ResponseWriter, r *http.Request) {
 	p := principal(r)
 	ctx := r.Context()
@@ -498,12 +566,9 @@ func (s *Server) playApp(w http.ResponseWriter, r *http.Request) {
 		s.mapErr(w, err)
 		return
 	}
-	if n, err := s.Store.Pairings().Reassign(ctx, store.PairingViaBrowser, p.User.ID); err != nil {
-		s.mapErr(w, err)
-		return
-	} else if n > 0 {
-		s.Log.Info("browser pairing now follows user", "user", p.User.Username, "pairings", n)
-	}
+	// The pairings moonlight-web makes with this token belong to this user:
+	// the embedded player presents a client certificate per browser and
+	// hub user (docs/OPERATIONS.md, In-browser play), so nothing is shared.
 	out := playJSON{App: s.Apps.View(a), MoonlightHost: host, MoonlightHostname: s.Cfg.MoonlightHostname}
 	out.Backend.Type = "wolf"
 	out.Backend.APIURL = s.Cfg.PublicURL.String() + "/wolf"
@@ -560,39 +625,7 @@ func (s *Server) appLogs(w http.ResponseWriter, r *http.Request) {
 
 // appEvents streams state changes for the caller's apps as SSE.
 func (s *Server) appEvents(w http.ResponseWriter, r *http.Request) {
-	p := principal(r)
-	rc := http.NewResponseController(w)
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("X-Accel-Buffering", "no")
-	w.WriteHeader(http.StatusOK)
-	_, _ = io.WriteString(w, ": connected\n\n")
-	_ = rc.Flush()
-
-	ch, cancel := s.Apps.Broker.Subscribe(p.User.ID)
-	defer cancel()
-	keepalive := time.NewTicker(25 * time.Second)
-	defer keepalive.Stop()
-	for {
-		select {
-		case <-r.Context().Done():
-			return
-		case <-keepalive.C:
-			if _, err := io.WriteString(w, ": ping\n\n"); err != nil {
-				return
-			}
-			_ = rc.Flush()
-		case ev := <-ch:
-			b, err := json.Marshal(ev)
-			if err != nil {
-				continue
-			}
-			if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", ev.Type, b); err != nil {
-				return
-			}
-			_ = rc.Flush()
-		}
-	}
+	s.streamEvents(w, r, principal(r).User.ID)
 }
 
 // ---- pairings ----

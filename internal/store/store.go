@@ -31,6 +31,23 @@ const (
 // States lists every state, for validation and metrics.
 var States = []string{StateStopped, StateStarting, StateRunning, StateStopping, StateFailed, StateDeleting}
 
+// Roles.
+const (
+	// RoleAdmin manages users, the catalog and every app.
+	RoleAdmin = "admin"
+	// RoleUser plays: instances of catalog apps, own pairings, own account.
+	RoleUser = "user"
+)
+
+// Quota limits what a user may create. A nil field means the server
+// default (config); zero or empty means unlimited.
+type Quota struct {
+	// MaxApps caps the user's apps (instances).
+	MaxApps *int `json:"max_apps,omitempty"`
+	// MaxStorage caps the sum of the user's home volumes (a quantity, e.g. 500Gi).
+	MaxStorage *string `json:"max_storage,omitempty"`
+}
+
 // User is a login account.
 type User struct {
 	ID           string
@@ -38,6 +55,8 @@ type User struct {
 	PasswordHash string
 	CreatedAt    time.Time
 	Disabled     bool
+	Role         string
+	Quota        Quota
 	// APIToken authenticates Wolf-compatible API calls (moonlight-web's
 	// auto-pairing) as this user. Stored hashed.
 	APITokenHash string
@@ -46,14 +65,43 @@ type User struct {
 	BrowserTokenHash string
 }
 
+// IsAdmin reports whether the user has the admin role.
+func (u *User) IsAdmin() bool { return u != nil && u.Role == RoleAdmin }
+
 // PairingViaBrowser marks a pairing made by the embedded moonlight-web.
 const PairingViaBrowser = "browser"
+
+// Template is a catalog entry: an app definition without an owner or a
+// runtime. Users create instances (App rows with TemplateID) from it.
+type Template struct {
+	ID           string
+	Name         string
+	Description  string
+	Preset       string
+	Image        string
+	IconURL      string
+	HDR          bool
+	Command      string
+	PVCSize      string
+	StorageClass string
+	Resources    config.Resources
+	Env          map[string]string
+	HostIPC      bool
+	Capabilities []string
+	Enabled      bool
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+}
 
 // App is one row of the apps table: a game or desktop app a user can
 // launch from Moonlight. The pod exists only while the app is running.
 type App struct {
 	ID      string
 	OwnerID string
+	// TemplateID is the catalog entry this app is an instance of ("" for
+	// an admin's custom app). Its settings are copied from the entry on
+	// every start.
+	TemplateID string
 	// MoonlightID is the numeric id Moonlight clients use for the app.
 	MoonlightID int32
 	Name        string
@@ -132,6 +180,23 @@ type Users interface {
 	SetAPITokenHash(ctx context.Context, id, hash string) error
 	GetByBrowserTokenHash(ctx context.Context, hash string) (*User, error)
 	SetBrowserTokenHash(ctx context.Context, id, hash string) error
+	List(ctx context.Context) ([]*User, error)
+	// Update replaces role, disabled and quota and returns the row.
+	Update(ctx context.Context, u *User) (*User, error)
+	SetPasswordHash(ctx context.Context, id, hash string) error
+	SetRole(ctx context.Context, id, role string) error
+	// Delete removes the user; apps and pairings go with it (cascade).
+	Delete(ctx context.Context, id string) error
+}
+
+// Catalog is the template aggregate.
+type Catalog interface {
+	Create(ctx context.Context, t *Template) error
+	Get(ctx context.Context, id string) (*Template, error)
+	List(ctx context.Context) ([]*Template, error)
+	// Update replaces the editable settings and returns the row.
+	Update(ctx context.Context, t *Template) (*Template, error)
+	Delete(ctx context.Context, id string) error
 }
 
 // Apps is the app aggregate.
@@ -169,10 +234,6 @@ type Pairings interface {
 	List(ctx context.Context, userID string) ([]*Pairing, error)
 	Delete(ctx context.Context, userID, id string) error
 	TouchSeen(ctx context.Context, id string, at time.Time) error
-	// Reassign moves every pairing made via the given way to the user and
-	// returns how many moved. The embedded moonlight-web is one Moonlight
-	// client shared by every browser, so its pairing follows the player.
-	Reassign(ctx context.Context, via, userID string) (int, error)
 }
 
 // Events is the app_events aggregate.
@@ -186,6 +247,7 @@ type Events interface {
 // Store bundles the aggregates.
 type Store interface {
 	Users() Users
+	Catalog() Catalog
 	Apps() Apps
 	Pairings() Pairings
 	Events() Events

@@ -30,6 +30,15 @@ var ErrInvalidTransition = errors.New("action not allowed in the app's current s
 // ErrNoSlot is returned when every stream slot is taken.
 var ErrNoSlot = errors.New("all stream slots are in use; stop another app first")
 
+// ErrForbidden is returned when the account's role does not allow the
+// action (users play catalog apps; admins define them).
+var ErrForbidden = errors.New("not allowed for this account")
+
+// QuotaError says which limit a request would exceed.
+type QuotaError struct{ Msg string }
+
+func (e *QuotaError) Error() string { return e.Msg }
+
 // ValidationError describes a bad request.
 type ValidationError struct{ Msg string }
 
@@ -47,6 +56,10 @@ type Defaults struct {
 	BrowserURL string `json:"browser_url"`
 	// MoonlightHost is the address Moonlight clients add as a host.
 	MoonlightHost string `json:"moonlight_host"`
+	// MaxApps and MaxStorage are the per-user quota defaults (0/empty =
+	// unlimited); a user's own Quota overrides them.
+	MaxApps    int    `json:"max_apps"`
+	MaxStorage string `json:"max_storage"`
 }
 
 // Service is the app business logic.
@@ -60,9 +73,15 @@ type Service struct {
 	now           func() time.Time
 }
 
-// CreateRequest is the JSON body of POST /apps and PATCH /apps/{id}.
+// CreateRequest is the JSON body of POST /apps and PATCH /apps/{id}, and
+// of the catalog routes. With TemplateID set, POST /apps creates an
+// instance of that catalog entry and only Name is read from the rest.
 type CreateRequest struct {
-	Name         string            `json:"name"`
+	TemplateID string `json:"template_id,omitempty"`
+	Name       string `json:"name"`
+	// Description and Enabled are catalog entry fields.
+	Description  string            `json:"description,omitempty"`
+	Enabled      *bool             `json:"enabled,omitempty"`
 	Preset       string            `json:"preset"`
 	Image        string            `json:"image"`
 	IconURL      string            `json:"icon_url"`
@@ -78,8 +97,13 @@ type CreateRequest struct {
 
 // View is the API representation of an app.
 type View struct {
-	ID           string            `json:"id"`
-	MoonlightID  int32             `json:"moonlight_id"`
+	ID          string `json:"id"`
+	OwnerID     string `json:"owner_id"`
+	MoonlightID int32  `json:"moonlight_id"`
+	// TemplateID names the catalog entry the app is an instance of ("" for
+	// an admin's custom app); TemplateName is filled in by the API.
+	TemplateID   string            `json:"template_id"`
+	TemplateName string            `json:"template_name,omitempty"`
 	Name         string            `json:"name"`
 	Preset       string            `json:"preset"`
 	Image        string            `json:"image"`
@@ -119,7 +143,7 @@ type StreamView struct {
 // View renders an app.
 func (s *Service) View(a *store.App) View {
 	v := View{
-		ID: a.ID, MoonlightID: a.MoonlightID, Name: a.Name, Preset: a.Preset, Image: a.Image, IconURL: a.IconURL, HDR: a.HDR,
+		ID: a.ID, OwnerID: a.OwnerID, MoonlightID: a.MoonlightID, TemplateID: a.TemplateID, Name: a.Name, Preset: a.Preset, Image: a.Image, IconURL: a.IconURL, HDR: a.HDR,
 		Command: a.Command, PVCSize: a.PVCSize, StorageClass: a.StorageClass, Resources: a.Resources, Env: a.Env, HostIPC: a.HostIPC,
 		Capabilities: a.Capabilities, State: a.State, StateReason: a.StateReason, Slot: a.Slot, StreamURL: a.StreamURL,
 		Streaming: a.State == store.StateRunning && a.WolfSessionID != "" && a.Stream != nil,
@@ -266,17 +290,47 @@ func MoonlightID(appID string) int32 {
 	return id
 }
 
-// Create validates and stores a new app in the stopped state.
+// Create validates and stores a new app in the stopped state. With a
+// template id the app is an instance of that catalog entry, which anyone
+// may create within their quota; a custom app (image, command and so on
+// chosen freely) is an admin's privilege.
 func (s *Service) Create(ctx context.Context, user *store.User, req CreateRequest) (*store.App, error) {
-	if err := s.validate(&req); err != nil {
-		return nil, err
+	a := &store.App{OwnerID: user.ID, State: store.StateStopped, Slot: -1}
+	if req.TemplateID != "" {
+		tpl, err := s.Store.Catalog().Get(ctx, req.TemplateID)
+		if err != nil {
+			return nil, err
+		}
+		if !tpl.Enabled && !user.IsAdmin() {
+			return nil, store.ErrNotFound
+		}
+		name := strings.TrimSpace(req.Name)
+		if name == "" {
+			name = tpl.Name
+		}
+		req = templateRequest(tpl)
+		req.Name = name
+		if err := s.validate(&req); err != nil {
+			return nil, err
+		}
+		a.TemplateID = tpl.ID
+	} else {
+		if !user.IsAdmin() {
+			return nil, ErrForbidden
+		}
+		if err := s.validate(&req); err != nil {
+			return nil, err
+		}
 	}
-	a := &store.App{OwnerID: user.ID, PVCSize: req.PVCSize, StorageClass: req.StorageClass, State: store.StateStopped, Slot: -1}
+	a.PVCSize, a.StorageClass = req.PVCSize, req.StorageClass
 	if a.PVCSize == "" {
 		a.PVCSize = s.Defaults.PVCSize
 	}
 	if a.StorageClass == "" {
 		a.StorageClass = s.Defaults.StorageClass
+	}
+	if err := s.checkQuota(ctx, user, a.PVCSize); err != nil {
+		return nil, err
 	}
 	s.apply(a, req)
 	for attempt := 0; attempt < 5; attempt++ {
@@ -291,7 +345,7 @@ func (s *Service) Create(ctx context.Context, user *store.User, req CreateReques
 		}
 	}
 	_ = s.Store.Events().Add(ctx, a.ID, "user", "created")
-	s.Log.Info("app created", "app", a.ID, "owner", user.ID, "name", a.Name, "preset", a.Preset)
+	s.Log.Info("app created", "app", a.ID, "owner", user.ID, "name", a.Name, "preset", a.Preset, "template", a.TemplateID)
 	s.publish(ctx, a)
 	return a, nil
 }
@@ -313,11 +367,18 @@ func (s *Service) List(ctx context.Context, ownerID string) ([]*store.App, error
 	return s.Store.Apps().List(ctx, ownerID)
 }
 
-// Update replaces a stopped or failed app's settings.
+// Update replaces a stopped or failed app's settings. Only an admin edits
+// an app, and an instance is edited through its catalog entry.
 func (s *Service) Update(ctx context.Context, user *store.User, id string, req CreateRequest) (*store.App, error) {
 	a, err := s.Get(ctx, user.ID, id)
 	if err != nil {
 		return nil, err
+	}
+	if !user.IsAdmin() {
+		return nil, ErrForbidden
+	}
+	if a.TemplateID != "" {
+		return nil, &ValidationError{"this app follows a catalog entry; edit the entry instead"}
 	}
 	if a.State != store.StateStopped && a.State != store.StateFailed {
 		return nil, ErrInvalidTransition
@@ -366,11 +427,15 @@ func (s *Service) Delete(ctx context.Context, user *store.User, id string) (*sto
 	if err != nil {
 		return nil, err
 	}
+	return s.remove(ctx, a, "user")
+}
+
+func (s *Service) remove(ctx context.Context, a *store.App, by string) (*store.App, error) {
 	updated, err := s.Store.Apps().SetState(ctx, a.ID, store.StateDeleting, "")
 	if err != nil {
 		return nil, err
 	}
-	_ = s.Store.Events().Add(ctx, a.ID, "user", "delete requested")
+	_ = s.Store.Events().Add(ctx, a.ID, by, "delete requested")
 	s.Orch.Notify(a.ID)
 	s.publish(ctx, updated)
 	return updated, nil
@@ -450,6 +515,9 @@ func (s *Service) Launch(ctx context.Context, user *store.User, pairing *store.P
 		}
 		_ = s.Store.Events().Add(ctx, a.ID, "moonlight", "launch retried by "+stream.ClientIP+"; keys updated, still starting")
 	case store.StateStopped, store.StateFailed:
+		if a, err = s.syncTemplate(ctx, a); err != nil {
+			return "", err
+		}
 		// One stream per user: stop whatever else runs.
 		list, err := s.Store.Apps().List(ctx, user.ID)
 		if err != nil {
@@ -494,6 +562,9 @@ func (s *Service) Start(ctx context.Context, user *store.User, id string) (*stor
 		return a, nil
 	default:
 		return nil, ErrInvalidTransition
+	}
+	if a, err = s.syncTemplate(ctx, a); err != nil {
+		return nil, err
 	}
 	list, err := s.Store.Apps().List(ctx, user.ID)
 	if err != nil {
@@ -614,7 +685,7 @@ func (s *Service) AppChanged(ctx context.Context, a *store.App) { s.publish(ctx,
 
 // AppDeleted implements reconcile.Notifier.
 func (s *Service) AppDeleted(_ context.Context, appID, ownerID string) {
-	s.Broker.Publish(ownerID, Event{Type: "deleted", ID: appID})
+	s.Broker.Publish(ownerID, Event{Type: "deleted", ID: appID, OwnerID: ownerID})
 }
 
 // ---- idle policy ----

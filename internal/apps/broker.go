@@ -6,8 +6,14 @@ import "sync"
 type Event struct {
 	Type string `json:"type"` // "app" (changed) or "deleted"
 	ID   string `json:"id"`
-	App  *View  `json:"app,omitempty"`
+	// OwnerID is set on deletions (the app is gone, so the view cannot
+	// carry it); the admin feed needs it.
+	OwnerID string `json:"owner_id,omitempty"`
+	App     *View  `json:"app,omitempty"`
 }
+
+// AllOwners subscribes to every owner's events (the admin overview).
+const AllOwners = "*"
 
 // Broker fans app events out to SSE subscribers, per owner.
 type Broker struct {
@@ -37,7 +43,7 @@ func (b *Broker) Publish(ownerID string, ev Event) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	for ch, owner := range b.subs {
-		if owner != ownerID {
+		if owner != ownerID && owner != AllOwners {
 			continue
 		}
 		select {

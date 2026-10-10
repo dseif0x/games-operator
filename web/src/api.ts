@@ -1,11 +1,33 @@
 import { href } from "./router";
 // Thin fetch wrapper for /api/v1. Cookie auth, CSRF header on writes.
 
+export type Role = "admin" | "user";
+
+/** A user's own limits; a missing field means the server default. */
+export interface Quota {
+  max_apps?: number;
+  max_storage?: string;
+}
+
+/** Effective limits (0 / "" = unlimited) next to what the user has. */
+export interface Usage {
+  max_apps: number;
+  max_storage: string;
+  apps: number;
+  storage: string;
+}
+
 export interface User {
   id: string;
   username: string;
+  role: Role;
   has_api_token: boolean;
+  disabled: boolean;
+  quota: Quota;
+  usage?: Usage;
 }
+
+export const isAdmin = (u: User | null | undefined) => !!u && u.role === "admin";
 
 /** A Kubernetes-style resource list: cpu, memory and extended resources such as nvidia.com/gpu. */
 export type ResourceList = { cpu?: string; memory?: string } & Record<string, string | undefined>;
@@ -28,7 +50,11 @@ export interface StreamInfo {
 
 export interface App {
   id: string;
+  owner_id: string;
   moonlight_id: number;
+  /** The catalog entry this app follows ("" for an admin's custom app). */
+  template_id: string;
+  template_name?: string;
   name: string;
   preset: string;
   image: string;
@@ -74,6 +100,41 @@ export interface Defaults {
   max_concurrent: number;
   browser_url: string;
   moonlight_host: string;
+  max_apps: number;
+  max_storage: string;
+}
+
+/** A catalog entry: an app definition users create instances of. */
+export interface Template {
+  id: string;
+  name: string;
+  description: string;
+  preset: string;
+  image: string;
+  icon_url: string;
+  hdr: boolean;
+  command: string;
+  pvc_size: string;
+  storage_class: string;
+  resources: Resources;
+  env: Record<string, string>;
+  host_ipc: boolean;
+  capabilities: string[];
+  enabled: boolean;
+  instances: number;
+}
+
+/** An app as the admin overview lists it, with its owner's name. */
+export interface OwnedApp extends App {
+  owner: string;
+}
+
+export interface UserRequest {
+  username?: string;
+  password?: string;
+  role?: Role;
+  disabled?: boolean;
+  quota?: Quota;
 }
 
 export interface AppEvent {
@@ -97,8 +158,12 @@ export interface PendingPair {
 }
 
 export interface CreateAppRequest {
+  /** Set: an instance of that catalog entry (only name is read besides). */
+  template_id?: string;
   name: string;
-  preset: string;
+  preset?: string;
+  description?: string;
+  enabled?: boolean;
   image?: string;
   icon_url?: string;
   hdr?: boolean;
@@ -181,16 +246,32 @@ export const api = {
 
   newApiToken: () => request<{ token: string; api_url: string }>("POST", "/me/api-token"),
   deleteApiToken: () => request<{ ok: boolean }>("DELETE", "/me/api-token"),
+  changePassword: (current_password: string, new_password: string) =>
+    request<{ ok: boolean }>("POST", "/me/password", { current_password, new_password }),
+
+  catalog: () => request<{ templates: Template[]; presets: Preset[]; defaults: Defaults }>("GET", "/catalog"),
+  createTemplate: (req: CreateAppRequest) => request<Template>("POST", "/catalog", req),
+  updateTemplate: (id: string, req: CreateAppRequest) => request<Template>("PATCH", `/catalog/${id}`, req),
+  deleteTemplate: (id: string) => request<{ ok: boolean }>("DELETE", `/catalog/${id}`),
+
+  users: () => request<{ users: User[]; defaults: { max_apps: number; max_storage: string } }>("GET", "/users"),
+  createUser: (req: UserRequest) => request<User>("POST", "/users", req),
+  updateUser: (id: string, req: UserRequest) => request<User>("PATCH", `/users/${id}`, req),
+  deleteUser: (id: string) => request<{ ok: boolean }>("DELETE", `/users/${id}`),
+
+  allApps: () => request<{ apps: OwnedApp[] }>("GET", "/admin/apps"),
+  stopAnyApp: (id: string) => request<App>("POST", `/admin/apps/${id}/stop`),
+  deleteAnyApp: (id: string) => request<App>("DELETE", `/admin/apps/${id}`),
 };
 
-/** Subscribe to app state changes over SSE. Returns a stop function. */
-export function subscribeApps(onEvent: (type: "app" | "deleted", id: string, app?: App) => void, onOpen?: () => void): () => void {
+/** Subscribe to app state changes over SSE (every user's with `all`). Returns a stop function. */
+export function subscribeApps(onEvent: (type: "app" | "deleted", id: string, app?: App) => void, onOpen?: () => void, all = false): () => void {
   let es: EventSource | null = null;
   let stopped = false;
   let retry = 1000;
   const connect = () => {
     if (stopped) return;
-    es = new EventSource(href("/api/v1/apps/events"));
+    es = new EventSource(href(all ? "/api/v1/admin/events" : "/api/v1/apps/events"));
     es.onopen = () => {
       retry = 1000;
       onOpen?.();

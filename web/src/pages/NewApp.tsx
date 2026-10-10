@@ -1,13 +1,19 @@
 import { useEffect, useState } from "preact/hooks";
-import { api, type App, type CreateAppRequest, type Defaults, type Preset, type User } from "../api";
+import { api, isAdmin, type App, type CreateAppRequest, type Defaults, type Preset, type Template, type User } from "../api";
 import { Nav } from "../components/Nav";
-import { navigate } from "../router";
+import { Link, navigate } from "../router";
 import { keyValueLines, parseKeyValues } from "../util";
 
 // NewApp creates an app, or with `edit` set replaces the settings of a
-// stopped one: same form, the fields that shape the volume locked.
-export function NewApp(props: { user: User; onLogout: () => void; edit?: string }) {
+// stopped one: same form, the fields that shape the volume locked. With
+// `catalog` it is the admin's catalog entry form instead: the same
+// settings, a description, and the volume fields as defaults for the
+// instances users create.
+export function NewApp(props: { user: User; onLogout: () => void; edit?: string; catalog?: boolean }) {
   const editing = !!props.edit;
+  const catalog = !!props.catalog;
+  const [description, setDescription] = useState("");
+  const [enabled, setEnabled] = useState(true);
   const [presets, setPresets] = useState<Preset[]>([]);
   const [defaults, setDefaults] = useState<Defaults | null>(null);
   const [name, setName] = useState("");
@@ -42,27 +48,45 @@ export function NewApp(props: { user: User; onLogout: () => void; edit?: string 
 
   useEffect(() => {
     if (!props.edit) return;
+    if (catalog) {
+      api
+        .catalog()
+        .then((r) => {
+          const t = r.templates.find((x) => x.id === props.edit);
+          if (!t) throw new Error("no such catalog entry");
+          fill(t);
+          setDescription(t.description);
+          setEnabled(t.enabled);
+          setEditable(true);
+        })
+        .catch((e) => setError((e as Error).message));
+      return;
+    }
     api
       .app(props.edit)
       .then((a: App) => {
-        setName(a.name);
-        setPreset(a.preset);
-        setImage(a.image);
-        setIconUrl(a.icon_url);
-        setHdr(a.hdr);
-        setPvcSize(a.pvc_size);
-        setStorageClass(a.storage_class);
-        setCpu(a.resources?.limits?.cpu || "");
-        setMemory(a.resources?.limits?.memory || "");
-        setExtended(keyValueLines(a.resources?.limits, ["cpu", "memory"]));
-        setEnv(keyValueLines(a.env));
-        setCommand(a.command);
-        setHostIpc(a.host_ipc);
-        setCaps(a.capabilities.join(" "));
+        fill(a);
         setEditable(a.state === "stopped" || a.state === "failed");
       })
       .catch((e) => setError((e as Error).message));
   }, [props.edit]);
+
+  const fill = (a: App | Template) => {
+    setName(a.name);
+    setPreset(a.preset);
+    setImage(a.image);
+    setIconUrl(a.icon_url);
+    setHdr(a.hdr);
+    setPvcSize(a.pvc_size);
+    setStorageClass(a.storage_class);
+    setCpu(a.resources?.limits?.cpu || "");
+    setMemory(a.resources?.limits?.memory || "");
+    setExtended(keyValueLines(a.resources?.limits, ["cpu", "memory"]));
+    setEnv(keyValueLines(a.env));
+    setCommand(a.command);
+    setHostIpc(a.host_ipc);
+    setCaps(a.capabilities.join(" "));
+  };
 
   const current = presets.find((p) => p.key === preset);
 
@@ -85,12 +109,22 @@ export function NewApp(props: { user: User; onLogout: () => void; edit?: string 
       capabilities: caps.trim() ? caps.trim().split(/[\s,]+/) : undefined,
     };
     if (hostIpc !== null) req.host_ipc = hostIpc;
-    if (!editing) {
+    if (!editing || catalog) {
       if (pvcSize.trim()) req.pvc_size = pvcSize.trim();
       if (storageClass.trim()) req.storage_class = storageClass.trim();
     }
+    if (catalog) {
+      req.description = description.trim();
+      req.enabled = enabled;
+    }
     setBusy(true);
     try {
+      if (catalog) {
+        if (editing) await api.updateTemplate(props.edit!, req);
+        else await api.createTemplate(req);
+        navigate("/admin/catalog");
+        return;
+      }
       const a = editing ? await api.updateApp(props.edit!, req) : await api.createApp(req);
       navigate(`/apps/${a.id}`);
     } catch (err) {
@@ -104,10 +138,27 @@ export function NewApp(props: { user: User; onLogout: () => void; edit?: string 
     <input value={value} placeholder={placeholder} disabled={disabled} onInput={(e) => set((e.target as HTMLInputElement).value)} />
   );
 
+  if (!isAdmin(props.user)) {
+    return (
+      <div class="page">
+        <Nav user={props.user} onLogout={props.onLogout} />
+        <div class="card empty">
+          Apps are defined by the admin. <Link href="/add">Add one from the catalog</Link>.
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div class="page">
       <Nav user={props.user} onLogout={props.onLogout} />
-      <h2 style="margin:0 0 12px">{editing ? "Edit app" : "New app"}</h2>
+      <h2 style="margin:0 0 12px">{catalog ? (editing ? "Edit catalog entry" : "New catalog entry") : editing ? "Edit app" : "New app"}</h2>
+      {catalog && (
+        <p class="muted hint">
+          A catalog entry is what users add to their own list. Each instance gets its own home volume of the size below; everything else follows
+          the entry on every start.
+        </p>
+      )}
       {editable === false && <div class="error">Stop the app before editing it.</div>}
       <form class="card" onSubmit={submit}>
         <label>Name (shown in Moonlight)</label>
@@ -119,6 +170,12 @@ export function NewApp(props: { user: User; onLogout: () => void; edit?: string 
             setNameTyped(true);
           }}
         />
+        {catalog && (
+          <>
+            <label>Description (shown in the catalog)</label>
+            <input value={description} placeholder="Big Picture with Proton" onInput={(e) => setDescription((e.target as HTMLInputElement).value)} />
+          </>
+        )}
         <label>Preset</label>
         <div class="presets">
           {presets.map((p) => (
@@ -151,12 +208,12 @@ export function NewApp(props: { user: User; onLogout: () => void; edit?: string 
             {input(iconUrl, setIconUrl, current?.icon_url || "https://…/icon.png")}
           </div>
           <div>
-            <label>Home volume size {editing ? "(fixed)" : ""}</label>
-            {input(pvcSize, setPvcSize, defaults?.pvc_size || "50Gi", editing)}
+            <label>Home volume size {editing && !catalog ? "(fixed)" : ""}</label>
+            {input(pvcSize, setPvcSize, defaults?.pvc_size || "50Gi", editing && !catalog)}
           </div>
           <div>
-            <label>Storage class {editing ? "(fixed)" : ""}</label>
-            {input(storageClass, setStorageClass, defaults?.storage_class || "cluster default", editing)}
+            <label>Storage class {editing && !catalog ? "(fixed)" : ""}</label>
+            {input(storageClass, setStorageClass, defaults?.storage_class || "cluster default", editing && !catalog)}
           </div>
           <div>
             <label>CPU limit</label>
@@ -170,6 +227,11 @@ export function NewApp(props: { user: User; onLogout: () => void; edit?: string 
         <label class="checkbox">
           <input type="checkbox" checked={hdr} onChange={(e) => setHdr((e.target as HTMLInputElement).checked)} /> Advertise HDR support
         </label>
+        {catalog && (
+          <label class="checkbox">
+            <input type="checkbox" checked={enabled} onChange={(e) => setEnabled((e.target as HTMLInputElement).checked)} /> Visible to users
+          </label>
+        )}
         <details>
           <summary>Advanced</summary>
           <label>Extended resources (one per line, e.g. nvidia.com/gpu=1)</label>
@@ -192,7 +254,7 @@ export function NewApp(props: { user: User; onLogout: () => void; edit?: string 
         {error && <div class="error">{error}</div>}
         <div class="row" style="margin-top:16px">
           <button class="btn primary" disabled={busy || editable === false}>
-            {busy ? "Saving…" : editing ? "Save" : "Create app"}
+            {busy ? "Saving…" : editing ? "Save" : catalog ? "Add to catalog" : "Create app"}
           </button>
           <button type="button" class="btn" onClick={() => history.back()}>
             Cancel

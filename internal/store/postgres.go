@@ -98,6 +98,9 @@ func (p *Postgres) Close() { p.pool.Close() }
 // Users returns the user aggregate.
 func (p *Postgres) Users() Users { return pgUsers{p.pool} }
 
+// Catalog returns the template aggregate.
+func (p *Postgres) Catalog() Catalog { return pgCatalog{p.pool} }
+
 // Apps returns the app aggregate.
 func (p *Postgres) Apps() Apps { return pgApps{p.pool} }
 
@@ -125,14 +128,27 @@ func mapErr(err error) error {
 
 type pgUsers struct{ pool *pgxpool.Pool }
 
-const userCols = "id, username, password_hash, created_at, disabled, api_token_hash, browser_token_hash"
+const userCols = "id, username, password_hash, created_at, disabled, api_token_hash, browser_token_hash, role, quota"
 
 func scanUser(row pgx.Row) (*User, error) {
 	var u User
-	if err := row.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.CreatedAt, &u.Disabled, &u.APITokenHash, &u.BrowserTokenHash); err != nil {
+	if err := row.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.CreatedAt, &u.Disabled, &u.APITokenHash, &u.BrowserTokenHash, &u.Role, &u.Quota); err != nil {
 		return nil, mapErr(err)
 	}
 	return &u, nil
+}
+
+func scanUsers(rows pgx.Rows) ([]*User, error) {
+	defer rows.Close()
+	var out []*User
+	for rows.Next() {
+		u, err := scanUser(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, u)
+	}
+	return out, mapErr(rows.Err())
 }
 
 func (r pgUsers) Create(ctx context.Context, u *User) error {
@@ -142,9 +158,52 @@ func (r pgUsers) Create(ctx context.Context, u *User) error {
 	if u.CreatedAt.IsZero() {
 		u.CreatedAt = time.Now()
 	}
-	_, err := r.pool.Exec(ctx, `INSERT INTO users (`+userCols+`) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-		u.ID, u.Username, u.PasswordHash, u.CreatedAt, u.Disabled, u.APITokenHash, u.BrowserTokenHash)
+	if u.Role == "" {
+		u.Role = RoleUser
+	}
+	_, err := r.pool.Exec(ctx, `INSERT INTO users (`+userCols+`) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+		u.ID, u.Username, u.PasswordHash, u.CreatedAt, u.Disabled, u.APITokenHash, u.BrowserTokenHash, u.Role, u.Quota)
 	return mapErr(err)
+}
+
+func (r pgUsers) List(ctx context.Context) ([]*User, error) {
+	rows, err := r.pool.Query(ctx, `SELECT `+userCols+` FROM users ORDER BY username`)
+	if err != nil {
+		return nil, mapErr(err)
+	}
+	return scanUsers(rows)
+}
+
+func (r pgUsers) Update(ctx context.Context, u *User) (*User, error) {
+	return scanUser(r.pool.QueryRow(ctx, `UPDATE users SET role=$2, disabled=$3, quota=$4 WHERE id=$1 RETURNING `+userCols,
+		u.ID, u.Role, u.Disabled, u.Quota))
+}
+
+func (r pgUsers) SetPasswordHash(ctx context.Context, id, hash string) error {
+	tag, err := r.pool.Exec(ctx, `UPDATE users SET password_hash=$2 WHERE id=$1`, id, hash)
+	if err != nil {
+		return mapErr(err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (r pgUsers) SetRole(ctx context.Context, id, role string) error {
+	_, err := r.pool.Exec(ctx, `UPDATE users SET role=$2 WHERE id=$1`, id, role)
+	return mapErr(err)
+}
+
+func (r pgUsers) Delete(ctx context.Context, id string) error {
+	tag, err := r.pool.Exec(ctx, `DELETE FROM users WHERE id=$1`, id)
+	if err != nil {
+		return mapErr(err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func (r pgUsers) GetByID(ctx context.Context, id string) (*User, error) {
@@ -186,23 +245,115 @@ func (r pgUsers) SetAPITokenHash(ctx context.Context, id, hash string) error {
 	return mapErr(err)
 }
 
+// ---- catalog ----
+
+type pgCatalog struct{ pool *pgxpool.Pool }
+
+const templateCols = `id, name, description, preset, image, icon_url, hdr, command, pvc_size, storage_class,
+	resources, env, host_ipc, capabilities, enabled, created_at, updated_at`
+
+func scanTemplate(row pgx.Row) (*Template, error) {
+	var t Template
+	err := row.Scan(&t.ID, &t.Name, &t.Description, &t.Preset, &t.Image, &t.IconURL, &t.HDR, &t.Command, &t.PVCSize, &t.StorageClass,
+		&t.Resources, &t.Env, &t.HostIPC, &t.Capabilities, &t.Enabled, &t.CreatedAt, &t.UpdatedAt)
+	if err != nil {
+		return nil, mapErr(err)
+	}
+	return &t, nil
+}
+
+func normaliseTemplate(t *Template) {
+	if t.Env == nil {
+		t.Env = map[string]string{}
+	}
+	if t.Capabilities == nil {
+		t.Capabilities = []string{}
+	}
+}
+
+func (r pgCatalog) Create(ctx context.Context, t *Template) error {
+	if t.ID == "" {
+		t.ID = NewID()
+	}
+	now := time.Now()
+	t.CreatedAt, t.UpdatedAt = now, now
+	normaliseTemplate(t)
+	_, err := r.pool.Exec(ctx, `INSERT INTO catalog (`+templateCols+`) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
+		t.ID, t.Name, t.Description, t.Preset, t.Image, t.IconURL, t.HDR, t.Command, t.PVCSize, t.StorageClass,
+		t.Resources, t.Env, t.HostIPC, t.Capabilities, t.Enabled, t.CreatedAt, t.UpdatedAt)
+	return mapErr(err)
+}
+
+func (r pgCatalog) Get(ctx context.Context, id string) (*Template, error) {
+	return scanTemplate(r.pool.QueryRow(ctx, `SELECT `+templateCols+` FROM catalog WHERE id=$1`, id))
+}
+
+func (r pgCatalog) List(ctx context.Context) ([]*Template, error) {
+	rows, err := r.pool.Query(ctx, `SELECT `+templateCols+` FROM catalog ORDER BY name`)
+	if err != nil {
+		return nil, mapErr(err)
+	}
+	defer rows.Close()
+	var out []*Template
+	for rows.Next() {
+		t, err := scanTemplate(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, mapErr(rows.Err())
+}
+
+func (r pgCatalog) Update(ctx context.Context, t *Template) (*Template, error) {
+	normaliseTemplate(t)
+	return scanTemplate(r.pool.QueryRow(ctx, `UPDATE catalog SET name=$2, description=$3, preset=$4, image=$5, icon_url=$6, hdr=$7, command=$8,
+		pvc_size=$9, storage_class=$10, resources=$11, env=$12, host_ipc=$13, capabilities=$14, enabled=$15, updated_at=now()
+		WHERE id=$1 RETURNING `+templateCols,
+		t.ID, t.Name, t.Description, t.Preset, t.Image, t.IconURL, t.HDR, t.Command, t.PVCSize, t.StorageClass,
+		t.Resources, t.Env, t.HostIPC, t.Capabilities, t.Enabled))
+}
+
+func (r pgCatalog) Delete(ctx context.Context, id string) error {
+	tag, err := r.pool.Exec(ctx, `DELETE FROM catalog WHERE id=$1`, id)
+	if err != nil {
+		return mapErr(err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // ---- apps ----
 
 type pgApps struct{ pool *pgxpool.Pool }
 
 const appCols = `id, owner_id, moonlight_id, name, preset, image, icon_url, hdr, command, pvc_size, storage_class,
 	resources, env, host_ipc, capabilities, state, state_reason, generation, stream, slot, wolf_session_id, stream_url,
-	created_at, updated_at, last_active_at`
+	created_at, updated_at, last_active_at, template_id`
 
 func scanApp(row pgx.Row) (*App, error) {
 	var a App
+	var template *string
 	err := row.Scan(&a.ID, &a.OwnerID, &a.MoonlightID, &a.Name, &a.Preset, &a.Image, &a.IconURL, &a.HDR, &a.Command, &a.PVCSize, &a.StorageClass,
 		&a.Resources, &a.Env, &a.HostIPC, &a.Capabilities, &a.State, &a.StateReason, &a.Generation, &a.Stream, &a.Slot, &a.WolfSessionID, &a.StreamURL,
-		&a.CreatedAt, &a.UpdatedAt, &a.LastActiveAt)
+		&a.CreatedAt, &a.UpdatedAt, &a.LastActiveAt, &template)
 	if err != nil {
 		return nil, mapErr(err)
 	}
+	if template != nil {
+		a.TemplateID = *template
+	}
 	return &a, nil
+}
+
+// nullable turns "" into SQL NULL for optional foreign keys.
+func nullable(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
 }
 
 func scanApps(rows pgx.Rows) ([]*App, error) {
@@ -244,10 +395,10 @@ func (r pgApps) Create(ctx context.Context, a *App) error {
 	}
 	normaliseApp(a)
 	_, err := r.pool.Exec(ctx, `INSERT INTO apps (`+appCols+`) VALUES
-		($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)`,
+		($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26)`,
 		a.ID, a.OwnerID, a.MoonlightID, a.Name, a.Preset, a.Image, a.IconURL, a.HDR, a.Command, a.PVCSize, a.StorageClass,
 		a.Resources, a.Env, a.HostIPC, a.Capabilities, a.State, a.StateReason, a.Generation, a.Stream, a.Slot, a.WolfSessionID, a.StreamURL,
-		a.CreatedAt, a.UpdatedAt, a.LastActiveAt)
+		a.CreatedAt, a.UpdatedAt, a.LastActiveAt, nullable(a.TemplateID))
 	return mapErr(err)
 }
 
@@ -278,9 +429,9 @@ func (r pgApps) ListAll(ctx context.Context) ([]*App, error) {
 func (r pgApps) Update(ctx context.Context, a *App) (*App, error) {
 	normaliseApp(a)
 	return scanApp(r.pool.QueryRow(ctx, `UPDATE apps SET name=$2, preset=$3, image=$4, icon_url=$5, hdr=$6, command=$7,
-		resources=$8, env=$9, host_ipc=$10, capabilities=$11, updated_at=now()
+		resources=$8, env=$9, host_ipc=$10, capabilities=$11, template_id=$12, updated_at=now()
 		WHERE id=$1 RETURNING `+appCols,
-		a.ID, a.Name, a.Preset, a.Image, a.IconURL, a.HDR, a.Command, a.Resources, a.Env, a.HostIPC, a.Capabilities))
+		a.ID, a.Name, a.Preset, a.Image, a.IconURL, a.HDR, a.Command, a.Resources, a.Env, a.HostIPC, a.Capabilities, nullable(a.TemplateID)))
 }
 
 func (r pgApps) SetState(ctx context.Context, id, state, reason string) (*App, error) {
@@ -408,14 +559,6 @@ func (r pgPairings) Delete(ctx context.Context, userID, id string) error {
 		return ErrNotFound
 	}
 	return nil
-}
-
-func (r pgPairings) Reassign(ctx context.Context, via, userID string) (int, error) {
-	tag, err := r.pool.Exec(ctx, `UPDATE pairings SET user_id=$2 WHERE via=$1 AND user_id<>$2`, via, userID)
-	if err != nil {
-		return 0, mapErr(err)
-	}
-	return int(tag.RowsAffected()), nil
 }
 
 func (r pgPairings) TouchSeen(ctx context.Context, id string, at time.Time) error {

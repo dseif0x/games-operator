@@ -143,21 +143,84 @@ func exercise(t *testing.T, st Store) {
 		t.Fatalf("delete by other user: %v", err)
 	}
 	// Browser pairings follow whoever presses Play.
+	// Roles, quotas, the user list and deletion.
+	if u2, _ := st.Users().GetByID(ctx, u.ID); u2.Role != RoleUser {
+		t.Fatalf("default role %q", u2.Role)
+	}
+	if err := st.Users().SetRole(ctx, u.ID, RoleAdmin); err != nil {
+		t.Fatal(err)
+	}
+	three := 3
+	if upd, err := st.Users().Update(ctx, &User{ID: u.ID, Role: RoleAdmin, Disabled: false, Quota: Quota{MaxApps: &three}}); err != nil || upd.Quota.MaxApps == nil || *upd.Quota.MaxApps != 3 || !upd.IsAdmin() {
+		t.Fatalf("update user: %+v %v", upd, err)
+	}
+	if err := st.Users().SetPasswordHash(ctx, u.ID, "hash3"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := st.Users().GetByUsername(ctx, "alice"); got.PasswordHash != "hash3" || got.Quota.MaxApps == nil {
+		t.Fatalf("password/quota not kept: %+v", got)
+	}
+	if list, err := st.Users().List(ctx); err != nil || len(list) != 1 || list[0].Username != "alice" {
+		t.Fatalf("users: %v %v", list, err)
+	}
+	if err := st.Users().SetPasswordHash(ctx, NewID(), "x"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("missing user: %v", err)
+	}
+	// The catalog and instances of it.
+	tpl := &Template{Name: "Steam", Preset: "steam", Image: "ghcr.io/games-on-whales/steam:edge", Enabled: true, PVCSize: "100Gi"}
+	if err := st.Catalog().Create(ctx, tpl); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Catalog().Create(ctx, &Template{Name: "Steam", Preset: "steam", Image: "x"}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("duplicate template name: %v", err)
+	}
+	tpl.Description = "Big Picture"
+	if upd, err := st.Catalog().Update(ctx, tpl); err != nil || upd.Description != "Big Picture" || upd.Env == nil {
+		t.Fatalf("update template: %+v %v", upd, err)
+	}
+	if list, _ := st.Catalog().List(ctx); len(list) != 1 || list[0].ID != tpl.ID {
+		t.Fatalf("catalog: %v", list)
+	}
+	inst := &App{OwnerID: u.ID, MoonlightID: 77, Name: "Steam", Preset: "steam", Image: tpl.Image, PVCSize: "100Gi", TemplateID: tpl.ID}
+	if err := st.Apps().Create(ctx, inst); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := st.Apps().Get(ctx, inst.ID); got.TemplateID != tpl.ID {
+		t.Fatalf("template id not kept: %+v", got)
+	}
+	if err := st.Catalog().Delete(ctx, tpl.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := st.Apps().Get(ctx, inst.ID); got.TemplateID != "" {
+		t.Fatalf("deleting the template must detach the instance: %+v", got)
+	}
+	if err := st.Catalog().Delete(ctx, tpl.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("missing template: %v", err)
+	}
+	if err := st.Apps().Delete(ctx, inst.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	// Deleting a user takes its pairings and apps along (the cascade).
 	bob, _ := st.Users().UpsertPassword(ctx, "bob", "h")
 	if err := st.Pairings().Upsert(ctx, &Pairing{ID: "mw", UserID: bob.ID, CertPEM: "c", Name: "moonlight-web", Via: PairingViaBrowser}); err != nil {
 		t.Fatal(err)
 	}
-	if n, err := st.Pairings().Reassign(ctx, PairingViaBrowser, u.ID); err != nil || n != 1 {
-		t.Fatalf("reassign: %v %d", err, n)
+	bobApp := &App{OwnerID: bob.ID, MoonlightID: 5, Name: "Bob's", Preset: "steam", Image: "i", PVCSize: "1Gi"}
+	if err := st.Apps().Create(ctx, bobApp); err != nil {
+		t.Fatal(err)
 	}
-	if mw, err := st.Pairings().Get(ctx, "mw"); err != nil || mw.UserID != u.ID || mw.Via != PairingViaBrowser {
-		t.Fatalf("reassigned pairing: %v %+v", err, mw)
+	if err := st.Users().Delete(ctx, bob.ID); err != nil {
+		t.Fatal(err)
 	}
-	if n, _ := st.Pairings().Reassign(ctx, PairingViaBrowser, u.ID); n != 0 {
-		t.Fatalf("reassign is idempotent: %d", n)
+	if _, err := st.Pairings().Get(ctx, "mw"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("bob's pairing must go with bob: %v", err)
 	}
-	if list, _ := st.Pairings().List(ctx, bob.ID); len(list) != 0 {
-		t.Fatal("bob must have lost the browser pairing")
+	if _, err := st.Apps().Get(ctx, bobApp.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("bob's app must go with bob: %v", err)
+	}
+	if err := st.Users().Delete(ctx, bob.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("deleting twice: %v", err)
 	}
 	if err := st.Pairings().Delete(ctx, u.ID, "fp"); err != nil {
 		t.Fatal(err)

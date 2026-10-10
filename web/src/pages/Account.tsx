@@ -6,6 +6,23 @@ import { Nav } from "../components/Nav";
 export function Account(props: { user: User; onLogout: () => void; onUser: (u: User) => void }) {
   const [token, setToken] = useState<{ token: string; api_url: string } | null>(null);
   const [error, setError] = useState("");
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [msg, setMsg] = useState("");
+
+  const changePassword = async (e: Event) => {
+    e.preventDefault();
+    setError("");
+    setMsg("");
+    try {
+      await api.changePassword(current, next);
+      setCurrent("");
+      setNext("");
+      setMsg("Password changed.");
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
 
   const generate = async () => {
     setError("");
@@ -33,7 +50,37 @@ export function Account(props: { user: User; onLogout: () => void; onUser: (u: U
       <Nav user={props.user} onLogout={props.onLogout} />
       <h2 style="margin:0 0 12px">Account</h2>
       {error && <div class="error">{error}</div>}
+      {msg && <div class="ok">{msg}</div>}
       <div class="card">
+        <h3>
+          {props.user.username} <span class="badge">{props.user.role}</span>
+        </h3>
+        {props.user.usage && (
+          <p class="muted">
+            {props.user.usage.apps}
+            {props.user.usage.max_apps > 0 ? ` of ${props.user.usage.max_apps}` : ""} apps · {props.user.usage.storage}
+            {props.user.usage.max_storage ? ` of ${props.user.usage.max_storage}` : ""} of storage
+          </p>
+        )}
+        <form onSubmit={changePassword}>
+          <div class="form-grid">
+            <div>
+              <label>Current password</label>
+              <input type="password" value={current} onInput={(e) => setCurrent((e.target as HTMLInputElement).value)} autocomplete="current-password" />
+            </div>
+            <div>
+              <label>New password (8+ characters)</label>
+              <input type="password" value={next} onInput={(e) => setNext((e.target as HTMLInputElement).value)} autocomplete="new-password" />
+            </div>
+          </div>
+          <div class="row" style="margin-top:12px">
+            <button class="btn primary" disabled={!current || !next}>
+              Change password
+            </button>
+          </div>
+        </form>
+      </div>
+      <div class="card" style="margin-top:12px">
         <h3>moonlight-web auto-pairing</h3>
         <p class="muted">
           moonlight-web can pair with this host without you typing a PIN: give it a <b>Wolf</b> backend with the API URL and token below (host card → ⋯ →

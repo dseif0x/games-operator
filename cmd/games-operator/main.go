@@ -99,8 +99,12 @@ func run() error {
 		}
 	}
 	if adminHash != "" {
-		if _, err := st.Users().UpsertPassword(ctx, cfg.AdminUsername, adminHash); err != nil {
+		admin, err := st.Users().UpsertPassword(ctx, cfg.AdminUsername, adminHash)
+		if err != nil {
 			return fmt.Errorf("bootstrap admin user: %w", err)
+		}
+		if err := st.Users().SetRole(ctx, admin.ID, store.RoleAdmin); err != nil {
+			return fmt.Errorf("bootstrap admin role: %w", err)
 		}
 		log.Info("admin user ready", "username", cfg.AdminUsername)
 	}
@@ -143,6 +147,7 @@ func run() error {
 		Defaults: apps.Defaults{
 			PVCSize: cfg.DefaultPVCSize, StorageClass: cfg.DefaultStorageClass, Resources: cfg.DefaultResources, MaxResources: cfg.MaxResources,
 			MaxConcurrent: cfg.MaxConcurrent, BrowserURL: cfg.BrowserURL, MoonlightHost: cfg.LBIP,
+			MaxApps: cfg.DefaultMaxApps, MaxStorage: cfg.DefaultMaxStorage,
 		},
 	}
 	rec := reconcile.New(rcfg, st, cs, inf, svc, cfg.ReconcileInterval, log)

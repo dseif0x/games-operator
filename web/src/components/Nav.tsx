@@ -1,4 +1,4 @@
-import type { User } from "../api";
+import { isAdmin, type User } from "../api";
 import { Link } from "../router";
 import { toggleTheme } from "../theme";
 
@@ -11,6 +11,11 @@ export function Nav(props: { user: User; onLogout: () => void; right?: preact.Co
       <Link href="/pair" class="btn small" title="Pair a Moonlight client">
         Pair
       </Link>
+      {isAdmin(props.user) && (
+        <Link href="/admin" class="btn small" title="Users, the catalog and every app">
+          Admin
+        </Link>
+      )}
       <span class="spacer" />
       {props.right}
       <Link href="/account" class="btn small" title="Account">

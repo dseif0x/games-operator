@@ -7,6 +7,8 @@ import { NewApp } from "./pages/NewApp";
 import { AppPage } from "./pages/AppPage";
 import { Pair } from "./pages/Pair";
 import { Account } from "./pages/Account";
+import { AddApp } from "./pages/AddApp";
+import { Admin } from "./pages/Admin";
 
 export function App() {
   const route = useRoute();
@@ -58,8 +60,16 @@ export function App() {
       return <AppPage id={route.params.id} user={user} onLogout={logout} />;
     case "/new":
       return <NewApp user={user} onLogout={logout} />;
+    case "/add":
+      return <AddApp user={user} onLogout={logout} />;
     case "/apps/:id/edit":
       return <NewApp user={user} onLogout={logout} edit={route.params.id} />;
+    case "/admin/catalog/new":
+      return <NewApp user={user} onLogout={logout} catalog />;
+    case "/admin/catalog/:id/edit":
+      return <NewApp user={user} onLogout={logout} catalog edit={route.params.id} />;
+    case "/admin":
+      return <Admin user={user} onLogout={logout} tab={route.params.tab} />;
     case "/pair":
       return <Pair user={user} onLogout={logout} />;
     case "/account":

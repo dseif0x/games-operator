@@ -68,7 +68,11 @@ func newServerAt(t *testing.T, basePath string, browser http.Handler) (*httptest
 	t.Helper()
 	st := store.NewMemory()
 	hash, _ := auth.HashPassword("secret")
-	if _, err := st.Users().UpsertPassword(context.Background(), "admin", hash); err != nil {
+	admin, err := st.Users().UpsertPassword(context.Background(), "admin", hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Users().SetRole(context.Background(), admin.ID, store.RoleAdmin); err != nil {
 		t.Fatal(err)
 	}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
