@@ -93,6 +93,10 @@ spec:
               value: {{ if .Values.devices.enabled }}"games-operator.io/input"{{ else }}""{{ end }}
             - name: GAMES_OPERATOR_APPS_PRIVILEGED
               value: {{ .Values.apps.privileged | quote }}
+            - name: GAMES_OPERATOR_APPS_USER_NAMESPACE
+              value: {{ .Values.apps.userNamespace | quote }}
+            - name: GAMES_OPERATOR_PROTON_SECCOMP
+              value: {{ if .Values.devices.enabled }}{{ .Values.apps.protonSeccomp | quote }}{{ else }}""{{ end }}
             - name: GAMES_OPERATOR_RENDER_NODE
               value: {{ .Values.apps.renderNode | quote }}
             - name: GAMES_OPERATOR_TIMEZONE

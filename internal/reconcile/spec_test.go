@@ -135,7 +135,63 @@ func TestBuildPodFirefoxIsConfined(t *testing.T) {
 	}
 }
 
-func TestNoContainerHasSysAdmin(t *testing.T) {
+func TestUserNamespaceLayout(t *testing.T) {
+	cfg := testCfg()
+	cfg.InputResource = "games-operator.io/input"
+	cfg.UserNamespace = true
+	app := testApp()
+	app.HostIPC = true             // a leftover setting: impossible with a user namespace
+	pod, err := BuildPod(app, cfg) // the Steam preset
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pod.Spec.HostUsers == nil || *pod.Spec.HostUsers {
+		t.Fatal("the pod must have its own user namespace")
+	}
+	if pod.Spec.HostIPC {
+		t.Fatal("hostIPC cannot be combined with a user namespace")
+	}
+	appC := pod.Spec.Containers[0]
+	if appC.SecurityContext.ProcMount == nil || *appC.SecurityContext.ProcMount != corev1.UnmaskedProcMount {
+		t.Fatal("the app gets an unmasked /proc for Proton's sandbox")
+	}
+	if !strings.Contains(appC.Command[2], `umount -l`) || !strings.HasPrefix(appC.Command[2], "for m in") {
+		t.Fatalf("the wrapper must unmask /proc first: %q", appC.Command[2][:80])
+	}
+	var hasSysAdmin bool
+	for _, c := range appC.SecurityContext.Capabilities.Add {
+		hasSysAdmin = hasSysAdmin || c == "SYS_ADMIN"
+	}
+	if !hasSysAdmin {
+		t.Fatal("Steam keeps SYS_ADMIN (scoped to the pod's user namespace) to unmask /proc")
+	}
+	for _, c := range pod.Spec.Containers[1:] {
+		if c.SecurityContext.ProcMount != nil {
+			t.Fatalf("%s keeps the default /proc", c.Name)
+		}
+	}
+	// Firefox: no SYS_ADMIN, the wrapper's unmount is a no-op, still unmasked.
+	app = testApp()
+	app.Preset = "firefox"
+	pod, _ = BuildPod(app, cfg)
+	if sc := pod.Spec.Containers[0].SecurityContext; len(sc.Capabilities.Add) != 0 || sc.ProcMount == nil {
+		t.Fatalf("firefox under a user namespace: %+v", sc)
+	}
+	// Privileged wins: no user namespace, host IPC as asked.
+	cfg.Privileged = true
+	pod, _ = BuildPod(app, cfg)
+	if pod.Spec.HostUsers != nil || pod.Spec.Containers[0].SecurityContext.ProcMount != nil {
+		t.Fatal("privileged pods share the node's user namespace")
+	}
+	// Off: no user namespace, no unmasking.
+	cfg.Privileged, cfg.UserNamespace = false, false
+	pod, _ = BuildPod(app, cfg)
+	if pod.Spec.HostUsers != nil || pod.Spec.Containers[0].SecurityContext.ProcMount != nil || strings.Contains(pod.Spec.Containers[0].Command[2], "umount") {
+		t.Fatal("without the option the pod is as before")
+	}
+}
+
+func TestWolfHasNoCapabilities(t *testing.T) {
 	cfg := testCfg()
 	cfg.InputResource = "games-operator.io/input"
 	pod, err := BuildPod(testApp(), cfg) // the Steam preset
@@ -144,13 +200,6 @@ func TestNoContainerHasSysAdmin(t *testing.T) {
 	}
 	for _, c := range pod.Spec.Containers {
 		sc := c.SecurityContext
-		if sc.Capabilities != nil {
-			for _, cap := range sc.Capabilities.Add {
-				if cap == "SYS_ADMIN" {
-					t.Fatalf("%s must not have SYS_ADMIN", c.Name)
-				}
-			}
-		}
 		switch c.Name {
 		case ContainerWolf:
 			if sc.Capabilities != nil && len(sc.Capabilities.Add) != 0 {
@@ -160,11 +209,11 @@ func TestNoContainerHasSysAdmin(t *testing.T) {
 				t.Fatal("Wolf runs under the default seccomp profile")
 			}
 		case ContainerApp:
-			// Proton's sandbox: no seccomp, but the capabilities stay small.
+			// Proton's sandbox: no seccomp without a profile to hand it.
 			if sc.SeccompProfile == nil || sc.SeccompProfile.Type != corev1.SeccompProfileTypeUnconfined {
 				t.Fatal("Steam runs without seccomp (user namespaces)")
 			}
-			if n := len(sc.Capabilities.Add); n == 0 || n > 3 {
+			if n := len(sc.Capabilities.Add); n == 0 || n > 4 {
 				t.Fatalf("Steam capabilities: %v", sc.Capabilities.Add)
 			}
 		}
@@ -390,5 +439,28 @@ func TestPrivilegedFallback(t *testing.T) {
 		if c.SecurityContext != nil && c.SecurityContext.Privileged != nil && *c.SecurityContext.Privileged {
 			t.Fatalf("%s privileged by default", c.Name)
 		}
+	}
+}
+
+func TestProtonSeccompProfile(t *testing.T) {
+	cfg := testCfg()
+	cfg.InputResource = "games-operator.io/input"
+	cfg.ProtonSeccomp = "games-operator/proton.json"
+	pod, err := BuildPod(testApp(), cfg) // Steam
+	if err != nil {
+		t.Fatal(err)
+	}
+	sc := pod.Spec.Containers[0].SecurityContext
+	if sc.SeccompProfile == nil || sc.SeccompProfile.Type != corev1.SeccompProfileTypeLocalhost || sc.SeccompProfile.LocalhostProfile == nil || *sc.SeccompProfile.LocalhostProfile != "games-operator/proton.json" {
+		t.Fatalf("Steam must run under the Proton profile: %+v", sc.SeccompProfile)
+	}
+	if sc.AppArmorProfile == nil || sc.AppArmorProfile.Type != corev1.AppArmorProfileTypeUnconfined {
+		t.Fatal("AppArmor stays unconfined (user namespaces)")
+	}
+	app := testApp()
+	app.Preset = "firefox"
+	pod, _ = BuildPod(app, cfg)
+	if sc := pod.Spec.Containers[0].SecurityContext; sc.SeccompProfile.Type != corev1.SeccompProfileTypeRuntimeDefault {
+		t.Fatal("confined presets keep the runtime default")
 	}
 }

@@ -53,6 +53,20 @@ apps:
   runtimeClassName: nvidia
   # -- Also request one `nvidia.com/gpu` for the wolf container (only needed when the device plugin ignores NVIDIA_VISIBLE_DEVICES; costs a second GPU slot unless time-slicing is on)
   wolfGpuRequest: false
+  # -- Seccomp profile for the Proton presets (Steam, Lutris, Heroic),
+  # relative to the kubelet's seccomp root; the device plugin installs it
+  # on every node (`devices.seccompDir`). It is the runtime's default
+  # profile plus the namespace and mount syscalls Proton's sandbox needs.
+  # Empty runs those presets unconfined, as before.
+  protonSeccomp: games-operator/proton.json
+  # -- Run app pods in their own user namespace (hostUsers: false): root in
+  # the pod is an unprivileged user on the node, which is what lets the app
+  # container have an unmasked /proc (Proton's sandbox needs one) without
+  # exposing the node. Needs Kubernetes 1.33+ and a home storage class on a
+  # filesystem that supports id-mapped mounts (local-path on ext4/xfs; not
+  # NFS). Off: the pod shares the node's user namespace and Proton's sandbox
+  # cannot start.
+  userNamespace: true
   # -- Run the Wolf and app containers privileged with the node's /dev
   # instead of handing them their input devices through the device plugin
   # (`devices.enabled`). Only for a container runtime without CDI.
@@ -122,10 +136,20 @@ devices:
   # -- Kernel modules to load on the node at start (needs hostPID and privileged for this one DaemonSet); empty = load nothing
   modprobe: ["uinput", "uhid", "hidraw"]
   # -- Node settings applied at start (same requirement). The default lets
-  # unconfined processes create user namespaces, which Proton's sandbox
-  # needs now that app containers have no SYS_ADMIN (Ubuntu 24.04 blocks it
-  # by default); empty = set nothing
+  # unconfined processes create user namespaces, which Proton's sandbox does
+  # as the game user (Ubuntu 24.04 blocks it by default); empty = set nothing
   sysctls: ["kernel.apparmor_restrict_unprivileged_userns=0"]
+  # -- The kubelet's seccomp root on the nodes, where the Proton profile is installed
+  seccompRoot: /var/lib/kubelet/seccomp
+  # -- Where the plugin keeps the node's copy of the device nodes that are
+  # bind-mounted into app pods (must not be on a filesystem mounted nodev,
+  # so not under /run)
+  hostNodesDir: /var/lib/games-operator/dev
+  # -- Make the node's DRM render nodes (/dev/dri/renderD*) world-accessible
+  # at start: the GPU runtime mounts them with their host group, which a pod
+  # in its own user namespace cannot be a member of. A udev rule
+  # (`KERNEL=="renderD*", MODE="0666"`) does the same permanently.
+  openRenderNodes: true
   # -- Where the plugin runs; empty = every node
   nodeSelector: {}
   # -- Tolerations, so it also runs on tainted GPU nodes

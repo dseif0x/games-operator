@@ -141,6 +141,14 @@ type Config struct {
 	// AppsPrivileged runs the Wolf and app containers privileged with the
 	// node's /dev, the way it was before the device plugin.
 	AppsPrivileged bool
+	// AppsUserNamespace runs app pods in their own user namespace
+	// (hostUsers: false): root in the pod is an unprivileged node user, and
+	// the app container gets an unmasked /proc for Proton's sandbox.
+	AppsUserNamespace bool
+	// ProtonSeccomp is the kubelet-local seccomp profile the Proton presets
+	// run under (relative to the kubelet's seccomp root; the device plugin
+	// installs it). Empty runs them unconfined.
+	ProtonSeccomp string
 	// RenderNode pins Wolf to one DRI render node (empty = Wolf picks).
 	RenderNode string
 	TimeZone   string
@@ -303,6 +311,8 @@ func load(get lookup) (*Config, error) {
 		DefaultMaxApps:      integer("DEFAULT_MAX_APPS", 0),
 		InputResource:       str("INPUT_RESOURCE", ""),
 		AppsPrivileged:      boolean("APPS_PRIVILEGED", false),
+		ProtonSeccomp:       str("PROTON_SECCOMP", ""),
+		AppsUserNamespace:   boolean("APPS_USER_NAMESPACE", false),
 		DefaultMaxStorage:   str("DEFAULT_MAX_STORAGE", ""),
 		LogLevel:            str("LOG_LEVEL", "info"),
 		ReconcileInterval:   dur("RECONCILE_INTERVAL", 30*time.Second),
