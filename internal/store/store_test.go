@@ -163,7 +163,7 @@ func exercise(t *testing.T, st Store) {
 	if list, err := st.Users().List(ctx); err != nil || len(list) != 1 || list[0].Username != "alice" {
 		t.Fatalf("users: %v %v", list, err)
 	}
-	if err := st.Users().SetPasswordHash(ctx, "nope", "x"); !errors.Is(err, ErrNotFound) {
+	if err := st.Users().SetPasswordHash(ctx, NewID(), "x"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("missing user: %v", err)
 	}
 	// The catalog and instances of it.
