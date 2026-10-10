@@ -66,7 +66,7 @@ A client's `/cancel` ends its stream and never stops the app: clients send it af
 
 **Resuming keeps the app.** Streams are started through Wolf's own Moonlight HTTPS side: the hub is a paired client of every Wolf (its client certificate is written into each pod's Wolf config), and a client reconnecting, a browser reload or a transport or codec fallback becomes a Wolf resume, which creates the session with the new keys but keeps the compositor and the input devices. The app never notices.
 
-moonlight-web is one Moonlight client for every browser. Its pairing is bound to whoever pressed Play last, so two different hub users cannot play through it at the same time; the same user on several devices can.
+moonlight-web presents one client certificate per browser and hub user (the fork derives its Wolf "seat" from the browser's device id and the user's id), and pairs each one through the hub's Wolf-compatible API with the browser token minted at Play, so the pairing lands on the right user and several users can play through the same moonlight-web at once. The one shared identity left is moonlight-web's default one, used for the host's pair status; it belongs to whoever paired first and re-pairs on its own if that account disappears.
 
 `browser.externalUrl` (with `enabled: false`) only adds a link to a stock moonlight-web you run elsewhere; pair it by hand through the Pair page or the Account page's API token.
 
@@ -78,6 +78,16 @@ A launch creates a pod requesting `nvidia.com/gpu`; a pending pod is what node a
 - `/cancel` while the app is `starting` is ignored, with an event on the app. Only a running app is quit by `/cancel`.
 - **Start** in the UI (`POST /api/v1/apps/{id}/start`) warms an app up without a client: the pod comes up and the app shows *Ready*. A launch then streams at once. Use it before sitting down to play, or when the node is asleep.
 - After the stream ends, or if no client ever comes, the app is stopped `apps.idleStopAfter` later (default 15 min), the pod disappears and the node can power off.
+
+## Users, roles and quotas
+
+The configured admin (`auth.adminUsername`) has the `admin` role; every other account is created on **Admin → Users** with a password and a role. Admins define the catalog, create custom apps, see and stop every app, and manage accounts (password reset, disable, delete; deleting an account tears its apps and volumes down). Users add apps from the catalog, run them, pair their own Moonlight clients and change their own password.
+
+Quotas limit users (never admins): `quotas.maxApps` and `quotas.maxStorage` are the defaults, and an account can carry its own values (Edit on the Users tab); 0 or empty means unlimited. A request past the limit is refused with the reason.
+
+The catalog (**Admin → Catalog**) holds app definitions: preset, image, command, resources, env, capabilities and the home volume size and class the instances get. A user's instance copies the entry on every start, so changing an entry reaches running instances on their next start; a hidden entry is invisible to users but keeps its instances; deleting an entry leaves the instances detached, running what they last ran. An instance is edited through its entry only.
+
+Isolation is at the data level: a user never sees another's apps, pairings or logs. The game pods themselves are privileged and share the node, so hand out accounts to people you would let on the machine.
 
 ## Input devices
 

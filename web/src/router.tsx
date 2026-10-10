@@ -54,6 +54,11 @@ function match(path: string): Route {
   if (parts[0] === "account") return { path: "/account", params: {} };
   if (parts[0] === "pair") return { path: "/pair", params: {} };
   if (parts[0] === "new") return { path: "/new", params: {} };
+  if (parts[0] === "add") return { path: "/add", params: {} };
+  if (parts[0] === "admin" && parts[1] === "catalog" && parts[2] === "new") return { path: "/admin/catalog/new", params: {} };
+  if (parts[0] === "admin" && parts[1] === "catalog" && parts[2] && parts[3] === "edit")
+    return { path: "/admin/catalog/:id/edit", params: { id: parts[2] } };
+  if (parts[0] === "admin") return { path: "/admin", params: { tab: parts[1] || "users" } };
   if (parts[0] === "apps" && parts[1] && parts[2] === "edit") return { path: "/apps/:id/edit", params: { id: parts[1] } };
   if (parts[0] === "apps" && parts[1]) return { path: "/apps/:id", params: { id: parts[1] } };
   return { path: "/", params: {} };

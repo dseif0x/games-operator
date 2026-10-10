@@ -1,5 +1,5 @@
 import { useEffect, useState } from "preact/hooks";
-import { api, subscribeApps, type App, type Defaults, type User } from "../api";
+import { api, isAdmin, subscribeApps, type App, type Defaults, type User } from "../api";
 import { Nav } from "../components/Nav";
 import { Link } from "../router";
 import { stateLabel, timeAgo } from "../util";
@@ -61,9 +61,16 @@ export function AppList(props: { user: User; onLogout: () => void }) {
         user={props.user}
         onLogout={props.onLogout}
         right={
-          <Link href="/new" class="btn primary small">
-            + New app
-          </Link>
+          <>
+            <Link href="/add" class="btn primary small" title="Add an app from the catalog">
+              + Add app
+            </Link>
+            {isAdmin(props.user) && (
+              <Link href="/new" class="btn small" title="A custom app: any image, command and settings">
+                + Custom app
+              </Link>
+            )}
+          </>
         }
       />
       {error && <div class="error">{error}</div>}
@@ -85,7 +92,7 @@ export function AppList(props: { user: User; onLogout: () => void }) {
         <div class="muted">Loading…</div>
       ) : apps.length === 0 ? (
         <div class="card empty">
-          No apps yet. <Link href="/new">Create one</Link> and it shows up in Moonlight.
+          No apps yet. <Link href="/add">Add one from the catalog</Link> and it shows up in Moonlight.
         </div>
       ) : (
         <div class="apps">
@@ -110,7 +117,7 @@ function AppCard({ a, browserUrl, onStart, onStop }: { a: App; browserUrl: strin
           <Link href={`/apps/${a.id}`}>{a.name}</Link>
           <span class={`dot ${a.state}`} title={stateLabel(a.state, a.streaming)} />
           <span class="badge">{stateLabel(a.state, a.streaming)}</span>
-          <span class="badge preset">{a.preset}</span>
+          <span class="badge preset">{a.template_name || a.preset}</span>
         </div>
         <div class="sub">
           {a.streaming && a.stream

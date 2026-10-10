@@ -86,6 +86,14 @@ apps:
   # -- Stop a running app this long after its last stream ended (0 = never)
   idleStopAfter: 15m
 
+# Per-user limits. These are the defaults; an admin sets different ones per
+# user on the Admin page. 0 or empty = unlimited. Admins are not limited.
+quotas:
+  # -- Apps (instances of catalog entries) a user may have
+  maxApps: 0
+  # -- Total size of a user's home volumes, e.g. 500Gi
+  maxStorage: ""
+
 browser:
   # -- Deploy the embedded moonlight-web (github.com/dseif0x/moonlight-web, branch games-operator): the Moonlight client that streams into the browser. The hub serves it below `path` on its own host, logs the browser in, and "Play in browser" takes an app straight to its stream
   enabled: false
@@ -97,7 +105,7 @@ browser:
     # -- Image of the games-operator fork of moonlight-web (embedded mode)
     repository: ghcr.io/dseif0x/moonlight-web
     # -- Fork tag (go-<version>)
-    tag: go-0.1.8
+    tag: go-0.1.9
     pullPolicy: IfNotPresent
   # -- Video codec moonlight-web asks the host for: `h264` plays in every browser; `auto` lets moonlight-web pick HEVC or AV1 when the browser claims support, and a browser that then cannot decode (desktop Firefox with HEVC) makes it re-launch the session, which restarts the app
   codec: h264

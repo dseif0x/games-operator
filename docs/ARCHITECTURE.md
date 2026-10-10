@@ -30,8 +30,9 @@ moonlight-web ──▶ /wolf/api/v1/pair/* (bearer token)                      
 
 | table | what |
 |---|---|
-| `users` | login accounts; `api_token_hash` for the Wolf-compatible API |
-| `apps` | one row per app: preset, image, resources, env, PVC, plus runtime columns (`state`, `generation`, `stream` JSON, `slot`, `wolf_session_id`, `stream_url`) |
+| `users` | login accounts with a `role` (`admin` or `user`) and a `quota` JSON (per-user overrides of the defaults); `api_token_hash` for the Wolf-compatible API |
+| `catalog` | app definitions an admin maintains (preset, image, command, resources, default volume); users create instances of them |
+| `apps` | one row per app: preset, image, resources, env, PVC, plus runtime columns (`state`, `generation`, `stream` JSON, `slot`, `wolf_session_id`, `stream_url`); `template_id` links an instance to its catalog entry, whose settings are copied in on every start |
 | `pairings` | Moonlight client certificates (by SHA-256 fingerprint) bound to a user |
 | `app_events` | per-app event log, pruned to 200 |
 
@@ -63,6 +64,7 @@ any ─delete→ deleting → row deleted
 - **No CRDs.** Apps are user data with a form; the reconciler is level-triggered over rows + labelled objects, exactly like agents-operator. Orphaned objects (labelled, no row) are deleted after a grace period.
 - **Per-slot ports instead of one fixed set.** fenrir could stream one session per cluster because Wolf's ports were fixed. Wolf takes its ports from the environment, so each slot gets its own set and its own Service on the shared IP.
 - **Dummy app in Wolf.** Wolf's `sessions/add` without `app_id` creates a no-op "process" app and a dummy client, which is what we want: the real application is a sibling container attached to Wolf's compositor and audio sockets. The generated `config.toml` is Wolf's own default (encoder pipelines included) with the profiles replaced.
+- **Roles.** An admin defines the catalog, creates custom apps (any image and command, root on the GPU node) and manages accounts; a user adds instances of catalog entries, within a quota on their number and the sum of their volumes, and otherwise only ever touches their own rows: `apps.Service` scopes every read and write by owner, the Moonlight server resolves the user from the paired certificate, and the SSE broker fans out per owner (plus a wildcard feed for the admin overview).
 - **Pairing in the hub.** The hub implements the four-phase PIN handshake itself, so pairings are rows bound to users and the PIN is typed into the hub UI (or posted by moonlight-web via the Wolf-compatible API). Wolf never sees the real client.
 - **Idle stop via the bridge.** Wolf emits `PauseStreamEvent`/`StopStreamEvent`; the bridge turns them into a `streaming` flag the hub polls, so an app whose client went away is stopped after `idleStopAfter` and the GPU node can power down.
 

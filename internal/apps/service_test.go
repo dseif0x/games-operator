@@ -71,6 +71,11 @@ func newService(t *testing.T) (*Service, *store.User, *fakeOrch) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// alice runs the place: custom apps are an admin's privilege.
+	if err := st.Users().SetRole(context.Background(), u.ID, store.RoleAdmin); err != nil {
+		t.Fatal(err)
+	}
+	u.Role = store.RoleAdmin
 	orch := &fakeOrch{st: st}
 	s := &Service{Store: st, Orch: orch, Broker: NewBroker(), Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
 		Defaults: Defaults{PVCSize: "50Gi", StorageClass: "nfs-fast", MaxConcurrent: 2,
@@ -226,6 +231,8 @@ func TestSlotsExhausted(t *testing.T) {
 	ctx := context.Background()
 	s.Defaults.MaxConcurrent = 1
 	other, _ := s.Store.Users().UpsertPassword(ctx, "bob", "x")
+	_ = s.Store.Users().SetRole(ctx, other.ID, store.RoleAdmin)
+	other.Role = store.RoleAdmin
 	a, _ := s.Create(ctx, u, CreateRequest{Name: "A", Preset: "steam"})
 	b, _ := s.Create(ctx, other, CreateRequest{Name: "B", Preset: "steam"})
 	if _, err := s.Launch(ctx, u, &store.Pairing{ID: "1", UserID: u.ID}, a.MoonlightID, store.Stream{Width: 1, Height: 1, FPS: 1}, false); err != nil {

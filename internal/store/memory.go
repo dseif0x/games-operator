@@ -11,6 +11,7 @@ import (
 type Memory struct {
 	mu       sync.Mutex
 	users    map[string]*User
+	catalog  map[string]*Template
 	apps     map[string]*App
 	pairings map[string]*Pairing
 	events   map[string][]*Event
@@ -19,10 +20,11 @@ type Memory struct {
 
 // NewMemory returns an empty in-memory store.
 func NewMemory() *Memory {
-	return &Memory{users: map[string]*User{}, apps: map[string]*App{}, pairings: map[string]*Pairing{}, events: map[string][]*Event{}}
+	return &Memory{users: map[string]*User{}, catalog: map[string]*Template{}, apps: map[string]*App{}, pairings: map[string]*Pairing{}, events: map[string][]*Event{}}
 }
 
 func (m *Memory) Users() Users       { return memUsers{m} }
+func (m *Memory) Catalog() Catalog   { return memCatalog{m} }
 func (m *Memory) Apps() Apps         { return memApps{m} }
 func (m *Memory) Pairings() Pairings { return memPairings{m} }
 func (m *Memory) Events() Events     { return memEvents{m} }
@@ -63,8 +65,166 @@ func (r memUsers) Create(_ context.Context, u *User) error {
 	if u.CreatedAt.IsZero() {
 		u.CreatedAt = time.Now()
 	}
+	if u.Role == "" {
+		u.Role = RoleUser
+	}
 	c := *u
 	r.m.users[u.ID] = &c
+	return nil
+}
+
+func (r memUsers) List(_ context.Context) ([]*User, error) {
+	r.m.mu.Lock()
+	defer r.m.mu.Unlock()
+	out := make([]*User, 0, len(r.m.users))
+	for _, u := range r.m.users {
+		c := *u
+		out = append(out, &c)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Username < out[j].Username })
+	return out, nil
+}
+
+func (r memUsers) Update(_ context.Context, u *User) (*User, error) {
+	r.m.mu.Lock()
+	defer r.m.mu.Unlock()
+	cur, ok := r.m.users[u.ID]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	cur.Role, cur.Disabled, cur.Quota = u.Role, u.Disabled, u.Quota
+	c := *cur
+	return &c, nil
+}
+
+func (r memUsers) SetPasswordHash(_ context.Context, id, hash string) error {
+	r.m.mu.Lock()
+	defer r.m.mu.Unlock()
+	u, ok := r.m.users[id]
+	if !ok {
+		return ErrNotFound
+	}
+	u.PasswordHash = hash
+	return nil
+}
+
+func (r memUsers) SetRole(_ context.Context, id, role string) error {
+	r.m.mu.Lock()
+	defer r.m.mu.Unlock()
+	u, ok := r.m.users[id]
+	if !ok {
+		return ErrNotFound
+	}
+	u.Role = role
+	return nil
+}
+
+// Delete removes the user and, like the database's cascade, its apps,
+// their events and its pairings.
+func (r memUsers) Delete(_ context.Context, id string) error {
+	r.m.mu.Lock()
+	defer r.m.mu.Unlock()
+	if _, ok := r.m.users[id]; !ok {
+		return ErrNotFound
+	}
+	delete(r.m.users, id)
+	for aid, a := range r.m.apps {
+		if a.OwnerID == id {
+			delete(r.m.apps, aid)
+			delete(r.m.events, aid)
+		}
+	}
+	for pid, p := range r.m.pairings {
+		if p.UserID == id {
+			delete(r.m.pairings, pid)
+		}
+	}
+	return nil
+}
+
+// ---- catalog ----
+
+type memCatalog struct{ m *Memory }
+
+func copyTemplate(t *Template) *Template {
+	c := *t
+	c.Env = map[string]string{}
+	for k, v := range t.Env {
+		c.Env[k] = v
+	}
+	c.Capabilities = append([]string{}, t.Capabilities...)
+	return &c
+}
+
+func (r memCatalog) Create(_ context.Context, t *Template) error {
+	r.m.mu.Lock()
+	defer r.m.mu.Unlock()
+	for _, x := range r.m.catalog {
+		if x.Name == t.Name {
+			return ErrConflict
+		}
+	}
+	if t.ID == "" {
+		t.ID = NewID()
+	}
+	now := time.Now()
+	t.CreatedAt, t.UpdatedAt = now, now
+	normaliseTemplate(t)
+	r.m.catalog[t.ID] = copyTemplate(t)
+	return nil
+}
+
+func (r memCatalog) Get(_ context.Context, id string) (*Template, error) {
+	r.m.mu.Lock()
+	defer r.m.mu.Unlock()
+	if t, ok := r.m.catalog[id]; ok {
+		return copyTemplate(t), nil
+	}
+	return nil, ErrNotFound
+}
+
+func (r memCatalog) List(_ context.Context) ([]*Template, error) {
+	r.m.mu.Lock()
+	defer r.m.mu.Unlock()
+	out := make([]*Template, 0, len(r.m.catalog))
+	for _, t := range r.m.catalog {
+		out = append(out, copyTemplate(t))
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out, nil
+}
+
+func (r memCatalog) Update(_ context.Context, t *Template) (*Template, error) {
+	r.m.mu.Lock()
+	defer r.m.mu.Unlock()
+	cur, ok := r.m.catalog[t.ID]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	for id, x := range r.m.catalog {
+		if id != t.ID && x.Name == t.Name {
+			return nil, ErrConflict
+		}
+	}
+	normaliseTemplate(t)
+	c := copyTemplate(t)
+	c.CreatedAt, c.UpdatedAt = cur.CreatedAt, time.Now()
+	r.m.catalog[t.ID] = c
+	return copyTemplate(c), nil
+}
+
+func (r memCatalog) Delete(_ context.Context, id string) error {
+	r.m.mu.Lock()
+	defer r.m.mu.Unlock()
+	if _, ok := r.m.catalog[id]; !ok {
+		return ErrNotFound
+	}
+	delete(r.m.catalog, id)
+	for _, a := range r.m.apps {
+		if a.TemplateID == id {
+			a.TemplateID = "" // ON DELETE SET NULL
+		}
+	}
 	return nil
 }
 
@@ -255,6 +415,7 @@ func (r memApps) Update(_ context.Context, a *App) (*App, error) {
 	normaliseApp(a)
 	cur.Name, cur.Preset, cur.Image, cur.IconURL, cur.HDR, cur.Command = a.Name, a.Preset, a.Image, a.IconURL, a.HDR, a.Command
 	cur.Resources, cur.Env, cur.HostIPC, cur.Capabilities = a.Resources, a.Env, a.HostIPC, a.Capabilities
+	cur.TemplateID = a.TemplateID
 	cur.UpdatedAt = time.Now()
 	return copyApp(cur), nil
 }
@@ -410,19 +571,6 @@ func (r memPairings) Delete(_ context.Context, userID, id string) error {
 	}
 	delete(r.m.pairings, id)
 	return nil
-}
-
-func (r memPairings) Reassign(_ context.Context, via, userID string) (int, error) {
-	r.m.mu.Lock()
-	defer r.m.mu.Unlock()
-	n := 0
-	for _, p := range r.m.pairings {
-		if p.Via == via && p.UserID != userID {
-			p.UserID = userID
-			n++
-		}
-	}
-	return n, nil
 }
 
 func (r memPairings) TouchSeen(_ context.Context, id string, at time.Time) error {

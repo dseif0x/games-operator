@@ -1,5 +1,5 @@
 import { useEffect, useState } from "preact/hooks";
-import { api, subscribeApps, type App, type AppEvent, type User } from "../api";
+import { api, isAdmin, subscribeApps, type App, type AppEvent, type User } from "../api";
 import { Nav } from "../components/Nav";
 import { Link, navigate } from "../router";
 import { stateLabel, timeAgo } from "../util";
@@ -64,7 +64,7 @@ export function AppPage(props: { id: string; user: User; onLogout: () => void })
           <h2 style="margin:0">{app.name}</h2>
           <div class="sub">
             <span class={`dot ${app.state}`} /> {stateLabel(app.state, app.streaming)}
-            {app.state_reason ? ` · ${app.state_reason}` : ""} · {app.preset} · {app.image}
+            {app.state_reason ? ` · ${app.state_reason}` : ""} · {app.template_name ? `catalog: ${app.template_name}` : app.preset} · {app.image}
           </div>
           {app.streaming && app.stream && (
             <div class="sub">
@@ -90,9 +90,11 @@ export function AppPage(props: { id: string; user: User; onLogout: () => void })
               Stop
             </button>
           )}
-          <Link href={`/apps/${app.id}/edit`} class="btn">
-            Edit
-          </Link>
+          {isAdmin(props.user) && !app.template_id && (
+            <Link href={`/apps/${app.id}/edit`} class="btn">
+              Edit
+            </Link>
+          )}
           <button
             class="btn danger"
             onClick={() => {

@@ -111,6 +111,10 @@ spec:
               value: {{ .Values.apps.extraEnv | toJson | quote }}
             - name: GAMES_OPERATOR_IDLE_STOP_AFTER
               value: {{ .Values.apps.idleStopAfter | quote }}
+            - name: GAMES_OPERATOR_DEFAULT_MAX_APPS
+              value: {{ .Values.quotas.maxApps | quote }}
+            - name: GAMES_OPERATOR_DEFAULT_MAX_STORAGE
+              value: {{ .Values.quotas.maxStorage | quote }}
             {{- if .Values.browser.enabled }}
             - name: GAMES_OPERATOR_BROWSER_UPSTREAM
               value: "https://{{ include "games-operator.fullname" . }}-moonlight-web:{{ .Values.browser.httpsPort }}"

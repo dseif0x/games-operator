@@ -15,6 +15,7 @@ hub ──▶ Postgres (users, apps, pairings)   hub ──▶ Kubernetes (pods,
 - **wolf-bridge** (`cmd/wolf-bridge`): sidecar that exposes Wolf's unix socket API to the hub with a per-launch token and tells the hub whether a client is streaming (idle stop).
 - **Apps**: created from presets (Steam, Firefox, Prism Launcher, RetroArch, Lutris, Heroic, Pegasus, custom image) with the launch wrapper, capabilities and devices that are known to work.
 - **Streams**: every running app gets its own port set (`48100+10×slot …`) on the IP the Moonlight Service uses (MetalLB `allow-shared-ip` / Cilium sharing key), so N users can play N apps at once.
+- **Users**: admins define a **catalog** of apps and manage accounts and quotas; users add catalog apps to their own list, each with its own home volume, and pair their own Moonlight clients. Every user sees only their apps, in the hub and in Moonlight.
 
 Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/OPERATIONS.md](docs/OPERATIONS.md), chart values in [charts/games-operator/values.yaml](charts/games-operator/values.yaml).
 
@@ -30,7 +31,7 @@ kubectl label ns games pod-security.kubernetes.io/enforce=privileged
 
 The NOTES print how to read the generated admin password. Then:
 
-1. Open the web UI, create an app (pick a preset).
+1. Open the web UI as the admin: add a catalog entry under **Admin → Catalog** (pick a preset), then **+ Add app** on your own list. Create accounts for the others under **Admin → Users**; they add apps from the catalog within their quota (`quotas.*`).
 2. In Moonlight add the LoadBalancer IP as a host and press pair; type the PIN on the UI's **Pair** page. The client is bound to your account and sees your apps.
 3. Launch the app in Moonlight. The pod is created (your GPU node wakes up if it is asleep), Wolf starts the stream, Moonlight connects. Quit the app in Moonlight, or wait `apps.idleStopAfter`, and the pod is deleted; the home volume stays.
 

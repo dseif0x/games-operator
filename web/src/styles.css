@@ -485,3 +485,42 @@ input.pin {
   letter-spacing: 6px;
   text-align: center;
 }
+
+/* Admin tables: one row per user / app / catalog entry. */
+table.kv.wide {
+  width: 100%;
+}
+
+table.kv.wide td {
+  vertical-align: middle;
+  padding: 8px 10px 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+table.kv.wide tr:last-child td {
+  border-bottom: none;
+}
+
+.icon.small {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+}
+
+select {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  color: inherit;
+  font: inherit;
+}
+
+.badge.running {
+  color: var(--ok, #2e9e5b);
+}
+
+.badge.failed {
+  color: var(--danger);
+}
