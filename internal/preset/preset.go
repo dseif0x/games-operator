@@ -15,7 +15,8 @@ type Preset struct {
 	Env         map[string]string `json:"env"`
 	// Capabilities the app container needs beyond the defaults.
 	Capabilities []string `json:"capabilities"`
-	// HostIPC shares the node's IPC namespace (Steam's compositor needs it).
+	// HostIPC shares the node's IPC namespace. Off: Wolf and the app share
+	// the pod's IPC namespace already, which is all the compositor needs.
 	HostIPC bool `json:"host_ipc"`
 	// Unconfined drops the seccomp and AppArmor profiles (Steam/Proton).
 	Unconfined bool `json:"unconfined"`
@@ -51,7 +52,7 @@ var presets = map[string]Preset{
 	"steam": {
 		Key: "steam", Title: "Steam", Description: "Steam Big Picture with Proton; the heavy one.",
 		Image: "ghcr.io/games-on-whales/steam:edge", IconURL: "https://cdn.freebiesupply.com/images/large/2x/steam-logo-transparent.png",
-		Env: withCommon(map[string]string{"PROTON_LOG": "1"}), Capabilities: steamCaps, HostIPC: true, Unconfined: true,
+		Env: withCommon(map[string]string{"PROTON_LOG": "1"}), Capabilities: steamCaps, HostIPC: false, Unconfined: true,
 	},
 	"firefox": {
 		Key: "firefox", Title: "Firefox", Description: "A browser on the big screen.",
@@ -61,31 +62,31 @@ var presets = map[string]Preset{
 	"prismlauncher": {
 		Key: "prismlauncher", Title: "Prism Launcher", Description: "Minecraft, with mod packs.",
 		Image: "ghcr.io/games-on-whales/prismlauncher:edge", IconURL: "https://raw.githubusercontent.com/games-on-whales/gow/master/apps/prismlauncher/assets/icon.png",
-		Env: withCommon(nil), Capabilities: lightCaps, HostIPC: true,
+		Env: withCommon(nil), Capabilities: lightCaps, HostIPC: false,
 	},
 	"retroarch": {
 		Key: "retroarch", Title: "RetroArch", Description: "Emulation frontend.",
 		Image: "ghcr.io/games-on-whales/retroarch:edge", IconURL: "https://raw.githubusercontent.com/games-on-whales/gow/master/apps/retroarch/assets/icon.png",
-		Env: withCommon(nil), Capabilities: lightCaps, HostIPC: true,
+		Env: withCommon(nil), Capabilities: lightCaps, HostIPC: false,
 	},
 	"lutris": {
 		Key: "lutris", Title: "Lutris", Description: "GOG, Epic and everything Wine.",
 		Image: "ghcr.io/games-on-whales/lutris:edge", IconURL: "https://raw.githubusercontent.com/games-on-whales/gow/master/apps/lutris/assets/icon.png",
-		Env: withCommon(nil), Capabilities: steamCaps, HostIPC: true, Unconfined: true,
+		Env: withCommon(nil), Capabilities: steamCaps, HostIPC: false, Unconfined: true,
 	},
 	"heroic": {
 		Key: "heroic", Title: "Heroic", Description: "Epic, GOG and Amazon launcher.",
 		Image: "ghcr.io/games-on-whales/heroic:edge", IconURL: "https://raw.githubusercontent.com/games-on-whales/gow/master/apps/heroic/assets/icon.png",
-		Env: withCommon(nil), Capabilities: steamCaps, HostIPC: true, Unconfined: true,
+		Env: withCommon(nil), Capabilities: steamCaps, HostIPC: false, Unconfined: true,
 	},
 	"pegasus": {
 		Key: "pegasus", Title: "Pegasus", Description: "Game library frontend.",
 		Image: "ghcr.io/games-on-whales/pegasus:edge", IconURL: "https://raw.githubusercontent.com/games-on-whales/gow/master/apps/pegasus/assets/icon.png",
-		Env: withCommon(nil), Capabilities: lightCaps, HostIPC: true,
+		Env: withCommon(nil), Capabilities: lightCaps, HostIPC: false,
 	},
 	"custom": {
 		Key: "custom", Title: "Custom image", Description: "Any Games on Whales compatible image.",
-		Env: withCommon(nil), Capabilities: lightCaps, HostIPC: true, Custom: true,
+		Env: withCommon(nil), Capabilities: lightCaps, HostIPC: false, Custom: true,
 	},
 }
 

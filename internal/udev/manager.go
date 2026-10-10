@@ -90,10 +90,16 @@ func (m *Manager) Scan() {
 	}
 }
 
-// Run prepares, scans, then follows /dev with inotify until ctx ends.
+// Run prepares, scans, then follows the devices until ctx ends: through
+// inotify on the node's /dev when DevRoot is set (the privileged layout),
+// else by polling sysfs (the device plugin layout, where the nodes are in
+// the container from the start and only the kernel's view changes).
 func (m *Manager) Run(ctx context.Context) error {
 	if err := m.Prepare(); err != nil {
 		return err
+	}
+	if m.DevRoot == "" {
+		return m.poll(ctx)
 	}
 	// Non-blocking, so the os.File reads through the runtime poller and
 	// a Close from the context's goroutine wakes the read up.
@@ -150,13 +156,75 @@ func (m *Manager) Run(ctx context.Context) error {
 	}
 }
 
+// PollEvery is the sysfs polling interval; a new device is announced
+// within it (libinput in Wolf waits up to two seconds for udev).
+var PollEvery = 250 * time.Millisecond
+
+// poll announces devices as they come and go in sysfs.
+func (m *Manager) poll(ctx context.Context) error {
+	t := time.NewTicker(PollEvery)
+	defer t.Stop()
+	for {
+		m.sync()
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-t.C:
+		}
+	}
+}
+
+// sync compares sysfs with the announced devices.
+func (m *Manager) sync() {
+	present := map[string]bool{}
+	for _, c := range []struct {
+		subsystem, dir string
+		ok             func(string) bool
+	}{
+		{"input", filepath.Join(m.SysRoot, "class", "input"), IsInputNode},
+		{"hidraw", filepath.Join(m.SysRoot, "class", "hidraw"), IsHidrawNode},
+	} {
+		entries, err := os.ReadDir(c.dir)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			if !c.ok(e.Name()) {
+				continue
+			}
+			key := c.subsystem + "/" + e.Name()
+			present[key] = true
+			m.mu.Lock()
+			_, known := m.known[key]
+			m.mu.Unlock()
+			if !known {
+				m.add(c.subsystem, e.Name())
+			}
+		}
+	}
+	m.mu.Lock()
+	var gone []string
+	for key := range m.known {
+		if !present[key] {
+			gone = append(gone, key)
+		}
+	}
+	m.mu.Unlock()
+	for _, key := range gone {
+		subsystem, name, _ := strings.Cut(key, "/")
+		m.remove(subsystem, name)
+	}
+}
+
 // Known lists the announced devices.
 func (m *Manager) Known() []*Device {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	out := make([]*Device, 0, len(m.known))
 	for _, d := range m.known {
-		out = append(out, d)
+		if d.Virtual {
+			out = append(out, d)
+		}
 	}
 	return out
 }
@@ -175,12 +243,15 @@ func (m *Manager) add(subsystem, name string) {
 		m.Log.Warn("input device not readable in sysfs", "subsystem", subsystem, "name", name, "err", err)
 		return
 	}
-	if !d.Virtual {
-		return
-	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if _, dup := m.known[subsystem+"/"+name]; dup {
+		return
+	}
+	if !d.Virtual {
+		// The node's own hardware: remembered so it is not inspected
+		// again, never announced.
+		m.known[subsystem+"/"+name] = d
 		return
 	}
 	db := filepath.Join(m.UdevDir, "data", d.DBName())
@@ -192,8 +263,10 @@ func (m *Manager) add(subsystem, name string) {
 		m.Log.Warn("udev database entry not written", "node", d.DevNode, "err", err)
 		return
 	}
-	if err := os.Chmod(m.nodePath(d), 0o666); err != nil { //nolint:gosec // the app's user must open it; the node is the pod's own
-		m.Log.Warn("device node permissions not changed", "node", d.DevNode, "err", err)
+	if m.DevRoot != "" {
+		if err := os.Chmod(m.nodePath(d), 0o666); err != nil { //nolint:gosec // the app's user must open it; the node is the pod's own
+			m.Log.Warn("device node permissions not changed", "node", d.DevNode, "err", err)
+		}
 	}
 	m.known[subsystem+"/"+name] = d
 	m.announce(d, "add")
@@ -208,6 +281,9 @@ func (m *Manager) remove(subsystem, name string) {
 		return
 	}
 	delete(m.known, subsystem+"/"+name)
+	if !d.Virtual {
+		return
+	}
 	_ = os.Remove(filepath.Join(m.UdevDir, "data", d.DBName()))
 	m.announce(d, "remove")
 	m.Log.Info("input device unplugged", "node", d.DevNode, "class", d.Class)

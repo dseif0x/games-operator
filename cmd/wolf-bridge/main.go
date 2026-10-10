@@ -107,14 +107,14 @@ func run() error {
 	return srv.Shutdown(sctx)
 }
 
-// announceDevices runs the udev stand-in (internal/udev) when the pod
-// mounts the node's /dev for it; an older pod spec without the mount
-// gets the bridge without hotplug.
+// announceDevices runs the udev stand-in (internal/udev): on the node's
+// /dev when the pod mounts it (the privileged layout), else on sysfs (the
+// device plugin layout).
 func announceDevices(ctx context.Context, log *slog.Logger) {
 	hostDev := envOr("WOLF_BRIDGE_HOST_DEV", bridge.HostDev)
 	if st, err := os.Stat(filepath.Join(hostDev, "input")); err != nil || !st.IsDir() {
-		log.Info("input hotplug off: no host /dev mounted", "path", hostDev)
-		return
+		log.Info("input hotplug from sysfs: no host /dev mounted")
+		hostDev = ""
 	}
 	m := &udev.Manager{DevRoot: hostDev, UdevDir: envOr("WOLF_BRIDGE_UDEV_DIR", bridge.UdevDir), Log: log}
 	if s, err := udev.Open(); err != nil {

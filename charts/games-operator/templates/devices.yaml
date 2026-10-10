@@ -1,0 +1,74 @@
+{{- if .Values.devices.enabled }}
+# The device plugin: on every game node it writes the CDI spec for Wolf's
+# virtual input devices and hands it to app pods, so they open those
+# devices without running privileged (docs/OPERATIONS.md, Input devices).
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "games-operator.fullname" . }}-devices
+  labels:
+    {{- include "games-operator.devicesLabels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "games-operator.devicesSelectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "games-operator.devicesSelectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.devices.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.devices.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      priorityClassName: system-node-critical
+      {{- if .Values.devices.modprobe }}
+      hostPID: true
+      {{- end }}
+      automountServiceAccountToken: false
+      containers:
+        - name: devices
+          image: "{{ .Values.devices.image.repository }}:{{ .Values.devices.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.apps.pullPolicy }}
+          env:
+            - name: DEVICES_CDI_DIR
+              value: /var/run/cdi
+            - name: DEVICES_SOCKET_DIR
+              value: /var/lib/kubelet/device-plugins
+            - name: DEVICES_COUNT
+              value: {{ .Values.devices.count | quote }}
+            {{- if .Values.devices.modprobe }}
+            - name: DEVICES_MODPROBE
+              value: {{ join "," .Values.devices.modprobe | quote }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.devices.resources | nindent 12 }}
+          securityContext:
+            {{- if .Values.devices.modprobe }}
+            # modprobe through the host's namespaces (nsenter).
+            privileged: true
+            {{- else }}
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            {{- end }}
+            readOnlyRootFilesystem: true
+          volumeMounts:
+            - name: device-plugin
+              mountPath: /var/lib/kubelet/device-plugins
+            - name: cdi
+              mountPath: /var/run/cdi
+      volumes:
+        - name: device-plugin
+          hostPath:
+            path: /var/lib/kubelet/device-plugins
+            type: Directory
+        - name: cdi
+          hostPath:
+            path: /var/run/cdi
+            type: DirectoryOrCreate
+{{- end }}

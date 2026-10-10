@@ -23,9 +23,12 @@ jobs:
             file: docker/hub.Dockerfile
           - name: games-operator-bridge
             file: docker/bridge.Dockerfile
+          - name: games-operator-devices
+            file: docker/devices.Dockerfile
     outputs:
       digest-games-operator: ${{ steps.digest.outputs.games-operator }}
       digest-games-operator-bridge: ${{ steps.digest.outputs.games-operator-bridge }}
+      digest-games-operator-devices: ${{ steps.digest.outputs.games-operator-devices }}
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-qemu-action@v3
@@ -97,6 +100,7 @@ jobs:
             echo '```'
             echo "ghcr.io/${{ github.repository_owner }}/games-operator@${{ needs.build.outputs.digest-games-operator }}"
             echo "ghcr.io/${{ github.repository_owner }}/games-operator-bridge@${{ needs.build.outputs.digest-games-operator-bridge }}"
+            echo "ghcr.io/${{ github.repository_owner }}/games-operator-devices@${{ needs.build.outputs.digest-games-operator-devices }}"
             echo '```'
             echo
             echo "## Chart"

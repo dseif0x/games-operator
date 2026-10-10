@@ -89,8 +89,10 @@ spec:
               value: {{ .Values.apps.runtimeClassName | quote }}
             - name: GAMES_OPERATOR_WOLF_GPU_REQUEST
               value: {{ .Values.apps.wolfGpuRequest | quote }}
-            - name: GAMES_OPERATOR_UINPUT_RESOURCE
-              value: {{ .Values.apps.uinputResource | quote }}
+            - name: GAMES_OPERATOR_INPUT_RESOURCE
+              value: {{ if .Values.devices.enabled }}"games-operator.io/input"{{ else }}""{{ end }}
+            - name: GAMES_OPERATOR_APPS_PRIVILEGED
+              value: {{ .Values.apps.privileged | quote }}
             - name: GAMES_OPERATOR_RENDER_NODE
               value: {{ .Values.apps.renderNode | quote }}
             - name: GAMES_OPERATOR_TIMEZONE

@@ -74,3 +74,19 @@ app.kubernetes.io/component: moonlight-web
 {{- define "games-operator.tlsSecretName" -}}
 {{- default (printf "%s-tls" (include "games-operator.fullname" .)) .Values.ingress.tlsSecretName }}
 {{- end }}
+
+{{/* Labels for the device plugin DaemonSet: the common set with the devices component. */}}
+{{- define "games-operator.devicesLabels" -}}
+helm.sh/chart: {{ include "games-operator.chart" . }}
+{{ include "games-operator.devicesSelectorLabels" . }}
+{{- if .Chart.AppVersion }}
+app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
+{{- end }}
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+{{- end }}
+
+{{- define "games-operator.devicesSelectorLabels" -}}
+app.kubernetes.io/name: {{ include "games-operator.name" . }}
+app.kubernetes.io/instance: {{ .Release.Name }}
+app.kubernetes.io/component: devices
+{{- end }}

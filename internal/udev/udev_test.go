@@ -254,3 +254,54 @@ func parse(msg []byte) map[string]string {
 	}
 	return out
 }
+
+func TestManagerPollsSysfs(t *testing.T) {
+	sys := fakeSys(t)
+	udevDir := filepath.Join(t.TempDir(), "udev")
+	msgs := make(chan map[string]string, 16)
+	old := PollEvery
+	PollEvery = 10 * time.Millisecond
+	defer func() { PollEvery = old }()
+	m := &Manager{SysRoot: sys, UdevDir: udevDir, Send: func(b []byte) error {
+		msgs <- parse(b)
+		return nil
+	}}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- m.Run(ctx) }()
+	seen := map[string]string{}
+	for i := 0; i < 7; i++ { // the DualSense's four nodes, the mouse, the keyboard, the hidraw node
+		select {
+		case p := <-msgs:
+			seen[p["DEVNAME"]] = p["ACTION"]
+		case <-time.After(5 * time.Second):
+			t.Fatalf("after %d messages: %v", i, seen)
+		}
+	}
+	if seen["/dev/input/event16"] != "add" || seen["/dev/hidraw3"] != "add" || seen["/dev/input/event2"] != "" {
+		t.Fatalf("announced: %v", seen)
+	}
+	if _, err := os.Stat(filepath.Join(udevDir, "data", "c13:66")); err == nil {
+		t.Fatal("the node's own hardware is never announced")
+	}
+	// Unplug: the sysfs entry goes.
+	if err := os.Remove(filepath.Join(sys, "class", "input", "event16")); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case p := <-msgs:
+		if p["ACTION"] != "remove" || p["DEVNAME"] != "/dev/input/event16" {
+			t.Fatalf("remove: %v", p)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no remove")
+	}
+	if n := len(m.Known()); n != 6 {
+		t.Fatalf("known %d", n)
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}

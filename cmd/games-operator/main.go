@@ -135,7 +135,7 @@ func run() error {
 	// Wiring.
 	rcfg := reconcile.Config{
 		Namespace: cfg.Namespace, WolfImage: cfg.WolfImage, InitImage: cfg.InitImage, BridgeImage: cfg.BridgeImageRef(),
-		ImagePullPolicy: cfg.ImagePullPolicy, RuntimeClass: cfg.RuntimeClass, WolfGPURequest: cfg.WolfGPURequest, UinputResource: cfg.UinputResource,
+		ImagePullPolicy: cfg.ImagePullPolicy, RuntimeClass: cfg.RuntimeClass, WolfGPURequest: cfg.WolfGPURequest, InputResource: cfg.InputResource, Privileged: cfg.AppsPrivileged,
 		RenderNode: cfg.RenderNode, TimeZone: cfg.TimeZone, MoonlightHostname: cfg.MoonlightHostname,
 		ClientCert: clientCert, ClientCertPEM: moonlight.CertPEM(clientCert),
 		DefaultStorageClass: cfg.DefaultStorageClass, DefaultPVCSize: cfg.DefaultPVCSize, DefaultResources: cfg.DefaultResources, MaxResources: cfg.MaxResources,
