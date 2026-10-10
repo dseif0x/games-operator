@@ -146,4 +146,25 @@ func TestSeccompProfile(t *testing.T) {
 	if changed, _ := WriteSeccompProfile(dir); changed {
 		t.Fatal("unchanged content must not rewrite")
 	}
+	// The written profile lists this node's syscall ABIs explicitly: the
+	// 32-bit ones too, or a 32-bit Steam client dies with SIGSYS.
+	written, _ := os.ReadFile(filepath.Join(dir, SeccompFile))
+	var got struct {
+		Architectures []string `json:"architectures"`
+		ArchMap       []any    `json:"archMap"`
+	}
+	if err := json.Unmarshal(written, &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.ArchMap) != 0 || len(got.Architectures) == 0 {
+		t.Fatalf("architectures: %+v", got)
+	}
+	amd, _ := SeccompProfile("amd64")
+	if !strings.Contains(string(amd), `"SCMP_ARCH_X86"`) || !strings.Contains(string(amd), `"SCMP_ARCH_X32"`) || !strings.Contains(string(amd), `"SCMP_ARCH_X86_64"`) {
+		t.Fatalf("amd64 profile lacks the 32-bit ABIs: %s", amd[:200])
+	}
+	arm, _ := SeccompProfile("arm64")
+	if !strings.Contains(string(arm), `"SCMP_ARCH_ARM"`) || strings.Contains(string(arm), `"SCMP_ARCH_X86"`) {
+		t.Fatal("arm64 profile")
+	}
 }

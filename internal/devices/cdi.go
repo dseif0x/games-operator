@@ -15,9 +15,11 @@ package devices
 import (
 	"bufio"
 	_ "embed"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -37,18 +39,56 @@ var ProtonSeccomp []byte
 // <dir>/SeccompFile relative to the kubelet's seccomp root.
 const SeccompFile = "proton.json"
 
-// WriteSeccompProfile installs the profile into dir atomically and
-// reports whether it changed.
+// SeccompArchitectures are the syscall ABIs the profile covers on this
+// node: the native one and its 32-bit ones. Steam's client is a 32-bit
+// program; an ABI the filter does not list gets the process killed
+// (SIGSYS) on its first syscall. The runtime's own default profile
+// derives this from an architecture map, which its loader does not
+// honour for a file profile, so the list is spelled out.
+func SeccompArchitectures(goarch string) []string {
+	switch goarch {
+	case "amd64":
+		return []string{"SCMP_ARCH_X86_64", "SCMP_ARCH_X86", "SCMP_ARCH_X32"}
+	case "arm64":
+		return []string{"SCMP_ARCH_AARCH64", "SCMP_ARCH_ARM"}
+	case "arm":
+		return []string{"SCMP_ARCH_ARM"}
+	case "386":
+		return []string{"SCMP_ARCH_X86"}
+	default:
+		return nil
+	}
+}
+
+// SeccompProfile renders the Proton profile for goarch.
+func SeccompProfile(goarch string) ([]byte, error) {
+	var prof map[string]any
+	if err := json.Unmarshal(ProtonSeccomp, &prof); err != nil {
+		return nil, err
+	}
+	delete(prof, "archMap")
+	if arches := SeccompArchitectures(goarch); arches != nil {
+		prof["architectures"] = arches
+	}
+	return json.MarshalIndent(prof, "", " ")
+}
+
+// WriteSeccompProfile installs the profile for this node's architecture
+// into dir atomically and reports whether it changed.
 func WriteSeccompProfile(dir string) (bool, error) {
+	want, err := SeccompProfile(runtime.GOARCH)
+	if err != nil {
+		return false, err
+	}
 	if err := os.MkdirAll(dir, 0o755); err != nil { //nolint:gosec // the kubelet reads it
 		return false, err
 	}
 	path := filepath.Join(dir, SeccompFile)
-	if cur, err := os.ReadFile(path); err == nil && string(cur) == string(ProtonSeccomp) {
+	if cur, err := os.ReadFile(path); err == nil && string(cur) == string(want) {
 		return false, nil
 	}
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, ProtonSeccomp, 0o644); err != nil { //nolint:gosec // see above
+	if err := os.WriteFile(tmp, want, 0o644); err != nil { //nolint:gosec // see above
 		return false, err
 	}
 	return true, os.Rename(tmp, path)
