@@ -34,9 +34,15 @@ type Config struct {
 	ImagePullPolicy string
 	RuntimeClass    string
 	WolfGPURequest  bool
-	UinputResource  string
-	RenderNode      string
-	TimeZone        string
+	// InputResource is the device plugin's extended resource; when set the
+	// Wolf and app containers request it and get their input devices
+	// through CDI instead of being privileged.
+	InputResource string
+	// Privileged runs Wolf and the app privileged with the node's /dev
+	// (no device plugin).
+	Privileged bool
+	RenderNode string
+	TimeZone   string
 	// MoonlightHostname is written into Wolf's config.
 	MoonlightHostname string
 	// ClientCert is the hub's Moonlight client certificate, listed as a
@@ -403,17 +409,17 @@ func BuildPod(a *store.App, cfg Config) (*corev1.Pod, error) {
 	for _, c := range caps {
 		capList = append(capList, corev1.Capability(c))
 	}
-	// Privileged: Wolf creates the virtual mouse, keyboard and controllers
-	// on the node through /dev/uinput and /dev/uhid, and the app reads the
-	// resulting /dev/input nodes as they appear. A hostPath puts the nodes
-	// in the container, but the device cgroup still refuses to open them;
-	// only a privileged container (or a device plugin, which cannot cover
-	// nodes created at runtime) gets through. The namespace is `privileged`
-	// for exactly this.
+	// Wolf creates the virtual mouse, keyboard and controllers on the node
+	// through /dev/uinput and /dev/uhid, and the app reads the resulting
+	// /dev/input nodes as they appear. A container's device cgroup only
+	// admits device numbers listed when it is created, so the device
+	// plugin (cfg.InputResource) lists every number those devices can get
+	// as nodes created up front (internal/devices); the fallback is a
+	// privileged container with the node's /dev.
 	appSec := &corev1.SecurityContext{
 		RunAsUser:                ptr.To[int64](0),
 		RunAsGroup:               ptr.To[int64](0),
-		Privileged:               ptr.To(true),
+		Privileged:               ptr.To(cfg.Privileged),
 		AllowPrivilegeEscalation: ptr.To(true),
 		Capabilities:             &corev1.Capabilities{Add: capList},
 	}
@@ -426,21 +432,35 @@ func BuildPod(a *store.App, cfg Config) (*corev1.Pod, error) {
 		command = preset.DefaultCommand
 	}
 	appResources := ClampResources(a.Resources, cfg.DefaultResources, cfg.MaxResources)
-	if cfg.UinputResource != "" {
+	withInput := func(r corev1.ResourceRequirements) corev1.ResourceRequirements {
+		if cfg.InputResource == "" {
+			return r
+		}
+		if r.Limits == nil {
+			r.Limits = corev1.ResourceList{}
+		}
+		if r.Requests == nil {
+			r.Requests = corev1.ResourceList{}
+		}
 		q := resource.MustParse("1")
-		appResources.Limits[corev1.ResourceName(cfg.UinputResource)] = q
-		appResources.Requests[corev1.ResourceName(cfg.UinputResource)] = q
+		r.Limits[corev1.ResourceName(cfg.InputResource)] = q
+		r.Requests[corev1.ResourceName(cfg.InputResource)] = q
+		return r
 	}
-	// The node's /dev, whole: the input and hidraw nodes of the virtual
-	// devices Wolf creates appear there while the app is running, and a
-	// privileged container's own /dev is a snapshot taken at start. The
-	// bridge announces each one through /run/udev (see internal/udev).
+	appResources = withInput(appResources)
+	// The bridge announces every virtual device through /run/udev (see
+	// internal/udev). With the device plugin the nodes are in the
+	// container from the start; privileged, the node's /dev is mounted
+	// whole, since a privileged container's own /dev is a snapshot taken
+	// at start and the nodes appear later.
 	appMounts := []corev1.VolumeMount{
 		{Name: "runtime", MountPath: RuntimeDir},
 		{Name: "home", MountPath: HomeDir},
-		{Name: "dev", MountPath: "/dev"},
 		{Name: "shm", MountPath: "/dev/shm"},
 		{Name: "udev", MountPath: "/run/udev", ReadOnly: true},
+	}
+	if cfg.Privileged {
+		appMounts = append(appMounts, corev1.VolumeMount{Name: "dev", MountPath: "/dev"})
 	}
 
 	wolfEnv := map[string]string{
@@ -477,11 +497,24 @@ func BuildPod(a *store.App, cfg Config) (*corev1.Pod, error) {
 		{Name: "runtime", MountPath: RuntimeDir},
 		{Name: "wolf", MountPath: WolfDir},
 		{Name: "wolf-state", MountPath: WolfStateDir},
-		{Name: "input", MountPath: "/dev/input"},
-		{Name: "uinput", MountPath: "/dev/uinput"},
 		// Wolf's compositor adds the controllers through libinput, which
 		// refuses a device udev has not initialized: the bridge's database.
 		{Name: "udev", MountPath: "/run/udev", ReadOnly: true},
+	}
+	wolfResources = withInput(wolfResources)
+	if cfg.Privileged {
+		wolfMounts = append(wolfMounts, corev1.VolumeMount{Name: "input", MountPath: "/dev/input"}, corev1.VolumeMount{Name: "uinput", MountPath: "/dev/uinput"})
+	}
+
+	// The hotplug announcer (internal/udev): writes the udev database and
+	// the hotplug messages. Privileged, it also watches the node's /dev
+	// and opens the nodes up; with the device plugin it reads sysfs.
+	bridgeMounts := []corev1.VolumeMount{
+		{Name: "wolf", MountPath: WolfDir},
+		{Name: "udev", MountPath: bridge.UdevDir},
+	}
+	if cfg.Privileged {
+		bridgeMounts = append(bridgeMounts, corev1.VolumeMount{Name: "dev", MountPath: bridge.HostDev})
 	}
 
 	nodeSelector := map[string]string{}
@@ -558,7 +591,9 @@ func BuildPod(a *store.App, cfg Config) (*corev1.Pod, error) {
 					SecurityContext: &corev1.SecurityContext{
 						RunAsUser: ptr.To[int64](0), RunAsGroup: ptr.To[int64](0),
 						// See appSec: uinput and uhid for the virtual input devices.
-						Privileged:   ptr.To(true),
+						Privileged: ptr.To(cfg.Privileged),
+						// SYS_NICE for the real-time threads; the rest is
+						// what Wolf's own container setup asks for.
 						Capabilities: &corev1.Capabilities{Add: []corev1.Capability{"NET_RAW", "MKNOD", "NET_ADMIN", "SYS_ADMIN", "SYS_NICE"}},
 					},
 				},
@@ -570,15 +605,9 @@ func BuildPod(a *store.App, cfg Config) (*corev1.Pod, error) {
 							LocalObjectReference: corev1.LocalObjectReference{Name: name}, Key: bridge.EnvToken,
 						}}},
 					},
-					Ports:     []corev1.ContainerPort{{Name: "bridge", ContainerPort: bridge.Port, Protocol: corev1.ProtocolTCP}},
-					Resources: small("10m", "32Mi", "200m", "64Mi"),
-					VolumeMounts: []corev1.VolumeMount{
-						{Name: "wolf", MountPath: WolfDir},
-						// The hotplug announcer: watches the node's /dev,
-						// writes the udev database, opens the nodes up.
-						{Name: "dev", MountPath: bridge.HostDev},
-						{Name: "udev", MountPath: bridge.UdevDir},
-					},
+					Ports:        []corev1.ContainerPort{{Name: "bridge", ContainerPort: bridge.Port, Protocol: corev1.ProtocolTCP}},
+					Resources:    small("10m", "32Mi", "200m", "64Mi"),
+					VolumeMounts: bridgeMounts,
 					ReadinessProbe: &corev1.Probe{
 						ProbeHandler:        corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{Path: "/readyz", Port: intstr.FromInt32(bridge.Port)}},
 						InitialDelaySeconds: 2, PeriodSeconds: 3, FailureThreshold: 2,
@@ -603,15 +632,19 @@ func BuildPod(a *store.App, cfg Config) (*corev1.Pod, error) {
 					Items: []corev1.DownwardAPIVolumeFile{{Path: "wolf-config", FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.annotations['" + AnnotationWolfConfig + "']"}}},
 				}}},
 				{Name: "home", VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: name}}},
-				{Name: "input", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/dev/input", Type: ptr.To(corev1.HostPathDirectory)}}},
-				{Name: "uinput", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/dev/uinput", Type: ptr.To(corev1.HostPathCharDev)}}},
-				{Name: "dev", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/dev", Type: ptr.To(corev1.HostPathDirectory)}}},
 				{Name: "udev", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
 				{Name: "shm", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{
 					Medium: corev1.StorageMediumMemory, SizeLimit: ptr.To(resource.MustParse("4Gi")),
 				}}},
 			},
 		},
+	}
+	if cfg.Privileged {
+		pod.Spec.Volumes = append(pod.Spec.Volumes,
+			corev1.Volume{Name: "input", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/dev/input", Type: ptr.To(corev1.HostPathDirectory)}}},
+			corev1.Volume{Name: "uinput", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/dev/uinput", Type: ptr.To(corev1.HostPathCharDev)}}},
+			corev1.Volume{Name: "dev", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/dev", Type: ptr.To(corev1.HostPathDirectory)}}},
+		)
 	}
 	if cfg.RuntimeClass != "" {
 		pod.Spec.RuntimeClassName = ptr.To(cfg.RuntimeClass)

@@ -120,7 +120,7 @@ func TestCreateValidation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if a.Image != "ghcr.io/games-on-whales/steam:edge" || !a.HostIPC || a.PVCSize != "50Gi" || a.State != store.StateStopped || a.MoonlightID <= 0 {
+	if a.Image != "ghcr.io/games-on-whales/steam:edge" || a.HostIPC || a.PVCSize != "50Gi" || a.State != store.StateStopped || a.MoonlightID <= 0 {
 		t.Fatalf("defaults: %+v", a)
 	}
 	v := s.View(a)

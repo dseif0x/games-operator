@@ -69,7 +69,7 @@ func TestBuildPod(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pod.Annotations["games-operator.io/generation"] != "3" || !pod.Spec.HostIPC || *pod.Spec.RuntimeClassName != "nvidia" {
+	if pod.Annotations["games-operator.io/generation"] != "3" || pod.Spec.HostIPC || *pod.Spec.RuntimeClassName != "nvidia" {
 		t.Fatalf("pod meta: %+v", pod.Spec)
 	}
 	names := map[string]corev1.Container{}
@@ -135,21 +135,40 @@ func TestBuildPodFirefoxIsConfined(t *testing.T) {
 	}
 }
 
-func TestBuildPodUinputResource(t *testing.T) {
+func TestBuildPodDevicePlugin(t *testing.T) {
 	cfg := testCfg()
-	cfg.UinputResource = "squat.ai/uinput"
+	cfg.InputResource = "games-operator.io/input"
 	pod, err := BuildPod(testApp(), cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	a := pod.Spec.Containers[0]
-	if q := a.Resources.Limits["squat.ai/uinput"]; q.String() != "1" {
-		t.Fatalf("uinput resource: %v", a.Resources.Limits)
-	}
-	for _, m := range a.VolumeMounts {
-		if m.MountPath == "/dev/uinput" {
-			t.Fatal("hostPath uinput must not be mounted when the resource is used")
+	for _, c := range pod.Spec.Containers {
+		switch c.Name {
+		case ContainerApp, ContainerWolf:
+			if q := c.Resources.Limits["games-operator.io/input"]; q.String() != "1" {
+				t.Fatalf("%s must request the input device: %v", c.Name, c.Resources.Limits)
+			}
+			if c.SecurityContext.Privileged != nil && *c.SecurityContext.Privileged {
+				t.Fatalf("%s must not be privileged with the device plugin", c.Name)
+			}
+		default:
+			if _, ok := c.Resources.Limits["games-operator.io/input"]; ok {
+				t.Fatalf("%s needs no input device", c.Name)
+			}
 		}
+		for _, m := range c.VolumeMounts {
+			if m.MountPath == "/dev" || m.MountPath == "/dev/input" || m.MountPath == "/dev/uinput" || m.Name == "dev" {
+				t.Fatalf("%s must not mount the node's devices: %+v", c.Name, m)
+			}
+		}
+	}
+	for _, v := range pod.Spec.Volumes {
+		if v.HostPath != nil {
+			t.Fatalf("no hostPath with the device plugin: %+v", v)
+		}
+	}
+	if pod.Spec.HostIPC {
+		t.Fatal("the pod's own IPC namespace is enough")
 	}
 }
 
@@ -231,8 +250,10 @@ func TestPodCarriesWolfConfig(t *testing.T) {
 	}
 }
 
-func TestInputHotplugMounts(t *testing.T) {
-	pod, err := BuildPod(testApp(), testCfg())
+func TestUdevSharedWithWolfAndApp(t *testing.T) {
+	cfg := testCfg()
+	cfg.InputResource = "games-operator.io/input"
+	pod, err := BuildPod(testApp(), cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -248,32 +269,16 @@ func TestInputHotplugMounts(t *testing.T) {
 		return out
 	}
 	app, wolf, br := mounts(ContainerApp), mounts(ContainerWolf), mounts(ContainerBridge)
-	if m, ok := app["/dev"]; !ok || m.Name != "dev" || m.ReadOnly {
-		t.Fatalf("the app needs the node's /dev (hotplugged nodes): %+v", app)
-	}
-	if m, ok := app["/dev/shm"]; !ok || m.Name != "shm" {
-		t.Fatal("the app's /dev/shm must stay the pod's own")
-	}
 	for name, ms := range map[string]map[string]corev1.VolumeMount{"app": app, "wolf": wolf} {
 		if m, ok := ms["/run/udev"]; !ok || m.Name != "udev" || !m.ReadOnly {
 			t.Fatalf("%s must read the bridge's udev directory: %+v", name, ms)
 		}
 	}
-	if m, ok := br[bridge.HostDev]; !ok || m.Name != "dev" || m.ReadOnly {
-		t.Fatal("the bridge must see the node's /dev read-write (node permissions)")
-	}
 	if m, ok := br[bridge.UdevDir]; !ok || m.Name != "udev" || m.ReadOnly {
 		t.Fatal("the bridge must write the udev directory")
 	}
-	vols := map[string]corev1.Volume{}
-	for _, v := range pod.Spec.Volumes {
-		vols[v.Name] = v
-	}
-	if v := vols["dev"]; v.HostPath == nil || v.HostPath.Path != "/dev" {
-		t.Fatalf("dev volume: %+v", v)
-	}
-	if v := vols["udev"]; v.EmptyDir == nil {
-		t.Fatalf("udev volume: %+v", v)
+	if m, ok := app["/dev/shm"]; !ok || m.Name != "shm" {
+		t.Fatal("the app's /dev/shm must stay the pod's own")
 	}
 	var caps []corev1.Capability
 	for _, c := range pod.Spec.Containers {
@@ -286,8 +291,10 @@ func TestInputHotplugMounts(t *testing.T) {
 	}
 }
 
-func TestWolfAndAppArePrivileged(t *testing.T) {
-	pod, err := BuildPod(testApp(), testCfg())
+func TestPrivilegedFallback(t *testing.T) {
+	cfg := testCfg()
+	cfg.Privileged = true
+	pod, err := BuildPod(testApp(), cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -296,12 +303,51 @@ func TestWolfAndAppArePrivileged(t *testing.T) {
 		switch c.Name {
 		case ContainerApp, ContainerWolf:
 			if !priv {
-				t.Fatalf("%s must be privileged for the virtual input devices", c.Name)
+				t.Fatalf("%s must be privileged in the fallback layout", c.Name)
 			}
 		default:
 			if priv {
 				t.Fatalf("%s must not be privileged", c.Name)
 			}
+		}
+	}
+	mounts := func(name string) map[string]corev1.VolumeMount {
+		out := map[string]corev1.VolumeMount{}
+		for _, c := range pod.Spec.Containers {
+			if c.Name == name {
+				for _, m := range c.VolumeMounts {
+					out[m.MountPath] = m
+				}
+			}
+		}
+		return out
+	}
+	app, wolf, br := mounts(ContainerApp), mounts(ContainerWolf), mounts(ContainerBridge)
+	if m, ok := app["/dev"]; !ok || m.Name != "dev" || m.ReadOnly {
+		t.Fatalf("the privileged app needs the node's /dev (hotplugged nodes): %+v", app)
+	}
+	if _, ok := wolf["/dev/uinput"]; !ok {
+		t.Fatal("privileged Wolf gets uinput as a hostPath")
+	}
+	if m, ok := br[bridge.HostDev]; !ok || m.Name != "dev" || m.ReadOnly {
+		t.Fatal("the bridge must see the node's /dev read-write (node permissions)")
+	}
+	vols := map[string]corev1.Volume{}
+	for _, v := range pod.Spec.Volumes {
+		vols[v.Name] = v
+	}
+	if v := vols["dev"]; v.HostPath == nil || v.HostPath.Path != "/dev" {
+		t.Fatalf("dev volume: %+v", v)
+	}
+	// Default: neither privileged nor a device plugin, i.e. a misconfigured
+	// chart; the pod still builds, without devices.
+	plain, err := BuildPod(testApp(), testCfg())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range plain.Spec.Containers {
+		if c.SecurityContext != nil && c.SecurityContext.Privileged != nil && *c.SecurityContext.Privileged {
+			t.Fatalf("%s privileged by default", c.Name)
 		}
 	}
 }

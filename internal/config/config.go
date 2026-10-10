@@ -133,9 +133,14 @@ type Config struct {
 	// WolfGPURequest also asks for one nvidia.com/gpu for the wolf container
 	// (needed when the device plugin does not honour NVIDIA_VISIBLE_DEVICES).
 	WolfGPURequest bool
-	// UinputResource is the extended resource that hands /dev/uinput to the
-	// app container (generic-device-plugin); empty = hostPath /dev/uinput.
-	UinputResource string
+	// InputResource is the extended resource of the games-operator device
+	// plugin (games-operator.io/input); app pods request it for Wolf and
+	// the app, which then get their input devices through CDI and run
+	// unprivileged. Empty: no plugin.
+	InputResource string
+	// AppsPrivileged runs the Wolf and app containers privileged with the
+	// node's /dev, the way it was before the device plugin.
+	AppsPrivileged bool
 	// RenderNode pins Wolf to one DRI render node (empty = Wolf picks).
 	RenderNode string
 	TimeZone   string
@@ -286,7 +291,6 @@ func load(get lookup) (*Config, error) {
 		ImagePullPolicy:     str("IMAGE_PULL_POLICY", "IfNotPresent"),
 		RuntimeClass:        str("RUNTIME_CLASS", ""),
 		WolfGPURequest:      boolean("WOLF_GPU_REQUEST", false),
-		UinputResource:      str("UINPUT_RESOURCE", ""),
 		RenderNode:          str("RENDER_NODE", ""),
 		TimeZone:            str("TIMEZONE", "Etc/UTC"),
 		DefaultStorageClass: str("DEFAULT_STORAGE_CLASS", ""),
@@ -297,6 +301,8 @@ func load(get lookup) (*Config, error) {
 		AdminPassword:       str("ADMIN_PASSWORD", ""),
 		IdleStopAfter:       dur("IDLE_STOP_AFTER", 15*time.Minute),
 		DefaultMaxApps:      integer("DEFAULT_MAX_APPS", 0),
+		InputResource:       str("INPUT_RESOURCE", ""),
+		AppsPrivileged:      boolean("APPS_PRIVILEGED", false),
 		DefaultMaxStorage:   str("DEFAULT_MAX_STORAGE", ""),
 		LogLevel:            str("LOG_LEVEL", "info"),
 		ReconcileInterval:   dur("RECONCILE_INTERVAL", 30*time.Second),

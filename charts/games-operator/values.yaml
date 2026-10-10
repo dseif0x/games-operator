@@ -53,8 +53,10 @@ apps:
   runtimeClassName: nvidia
   # -- Also request one `nvidia.com/gpu` for the wolf container (only needed when the device plugin ignores NVIDIA_VISIBLE_DEVICES; costs a second GPU slot unless time-slicing is on)
   wolfGpuRequest: false
-  # -- Extended resource that hands /dev/uinput to app containers (generic-device-plugin, e.g. `squat.ai/uinput`); empty mounts /dev/uinput as a hostPath
-  uinputResource: ""
+  # -- Run the Wolf and app containers privileged with the node's /dev
+  # instead of handing them their input devices through the device plugin
+  # (`devices.enabled`). Only for a container runtime without CDI.
+  privileged: false
   # -- Pin Wolf to one DRI render node (e.g. /dev/dri/renderD128); empty lets Wolf pick
   renderNode: ""
   # -- Time zone inside app pods
@@ -85,6 +87,33 @@ apps:
   extraEnv: {}
   # -- Stop a running app this long after its last stream ended (0 = never)
   idleStopAfter: 15m
+
+# The device plugin: a DaemonSet on the game nodes that writes a CDI spec
+# for Wolf's virtual input devices (uinput, uhid, the input and hidraw
+# nodes) and hands it to app pods as the extended resource
+# `games-operator.io/input`, so Wolf and the app open those devices
+# without running privileged. Needs CDI in the container runtime
+# (containerd 1.7+ with enable_cdi, the default since 2.0).
+devices:
+  # -- Deploy the device plugin and request its resource for app pods
+  enabled: true
+  image:
+    # -- Device plugin image (built from this repo)
+    repository: ghcr.io/dseif0x/games-operator-devices
+    # -- Image tag; defaults to .Chart.AppVersion
+    tag: ""
+  # -- Devices advertised per node: the number of containers (two per app pod) that can hold one at a time
+  count: 64
+  # -- Kernel modules to load on the node at start (needs hostPID and privileged for this one DaemonSet); empty = load nothing
+  modprobe: ["uinput", "uhid", "hidraw"]
+  # -- Where the plugin runs; empty = every node
+  nodeSelector: {}
+  # -- Tolerations, so it also runs on tainted GPU nodes
+  tolerations:
+    - operator: Exists
+  resources:
+    requests: { cpu: 5m, memory: 16Mi }
+    limits: { cpu: 100m, memory: 64Mi }
 
 # Per-user limits. These are the defaults; an admin sets different ones per
 # user on the Admin page. 0 or empty = unlimited. Admins are not limited.
