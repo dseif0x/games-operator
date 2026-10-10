@@ -75,7 +75,7 @@ func (p *Plugin) Run(ctx context.Context) error {
 func (p *Plugin) register(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	conn, err := grpc.NewClient("unix://"+filepath.Join(p.SocketDir, pluginapi.KubeletSocket), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.NewClient("unix://"+filepath.Join(p.SocketDir, "kubelet.sock"), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return fmt.Errorf("kubelet socket: %w", err)
 	}
