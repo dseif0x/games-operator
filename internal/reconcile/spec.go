@@ -41,8 +41,16 @@ type Config struct {
 	// Privileged runs Wolf and the app privileged with the node's /dev
 	// (no device plugin).
 	Privileged bool
-	RenderNode string
-	TimeZone   string
+	// UserNamespace runs the pod in its own user namespace (hostUsers:
+	// false) with an unmasked /proc in the app container. Ignored when
+	// Privileged.
+	UserNamespace bool
+	// ProtonSeccomp is the kubelet-local seccomp profile for the presets
+	// that would otherwise run unconfined (devices.ProtonSeccomp, installed
+	// by the device plugin). Empty: unconfined.
+	ProtonSeccomp string
+	RenderNode    string
+	TimeZone      string
 	// MoonlightHostname is written into Wolf's config.
 	MoonlightHostname string
 	// ClientCert is the hub's Moonlight client certificate, listed as a
@@ -359,6 +367,10 @@ func Preset(a *store.App) preset.Preset {
 	return p
 }
 
+// unmaskProc lazily unmounts everything mounted over /proc; failures (no
+// SYS_ADMIN) are ignored.
+const unmaskProc = `for m in $(grep " /proc/" /proc/self/mountinfo | awk '{print $5}' | sort -r); do umount -l "$m" 2>/dev/null || true; done`
+
 // BuildPod returns the desired Pod: the app container next to Wolf (which
 // brings its own PulseAudio) and the bridge, sharing one runtime directory.
 //
@@ -429,13 +441,35 @@ func BuildPod(a *store.App, cfg Config) (*corev1.Pod, error) {
 	// SYS_ADMIN, and Ubuntu's AppArmor only allows for unconfined
 	// processes once kernel.apparmor_restrict_unprivileged_userns is off
 	// (the device plugin sets it, devices.sysctls).
+	userns := cfg.UserNamespace && !cfg.Privileged
+	if userns {
+		// Unmasked: Proton's sandbox mounts a fresh /proc inside a user
+		// namespace, which the kernel refuses when the parent /proc has
+		// anything mounted over it (the masks). Only allowed, and only
+		// safe, in a pod with its own user namespace: root in the pod
+		// cannot write the node's /proc/sys then. The launch wrapper
+		// removes what the GPU runtime still mounts over /proc.
+		appSec.ProcMount = ptr.To(corev1.UnmaskedProcMount)
+	}
 	if p.Unconfined {
 		appSec.SeccompProfile = &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeUnconfined}
+		if cfg.ProtonSeccomp != "" {
+			// The default profile plus the namespace syscalls: the sandbox
+			// works, the rest of what the default blocks stays blocked.
+			appSec.SeccompProfile = &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeLocalhost, LocalhostProfile: ptr.To(cfg.ProtonSeccomp)}
+		}
 		appSec.AppArmorProfile = &corev1.AppArmorProfile{Type: corev1.AppArmorProfileTypeUnconfined}
 	}
 	command := a.Command
 	if command == "" {
 		command = preset.DefaultCommand
+	}
+	if userns {
+		// Whatever is still mounted over /proc (the NVIDIA runtime's
+		// params file) would keep the sandbox from mounting its own; the
+		// wrapper runs as root with the preset's SYS_ADMIN, scoped to the
+		// pod's user namespace. Presets without it just skip this.
+		command = unmaskProc + "\n" + command
 	}
 	appResources := ClampResources(a.Resources, cfg.DefaultResources, cfg.MaxResources)
 	withInput := func(r corev1.ResourceRequirements) corev1.ResourceRequirements {
@@ -549,9 +583,12 @@ func BuildPod(a *store.App, cfg Config) (*corev1.Pod, error) {
 			AutomountServiceAccountToken:  ptr.To(false),
 			EnableServiceLinks:            ptr.To(false),
 			TerminationGracePeriodSeconds: ptr.To[int64](30),
-			HostIPC:                       hostIPC,
-			NodeSelector:                  nodeSelector,
-			Tolerations:                   tolerations,
+			// A pod in its own user namespace cannot share the node's IPC
+			// namespace (and has no use for it: Wolf and the app share
+			// the pod's).
+			HostIPC:      hostIPC && !userns,
+			NodeSelector: nodeSelector,
+			Tolerations:  tolerations,
 			InitContainers: []corev1.Container{{
 				// Wolf and the app share the runtime dir as different users;
 				// the config comes from the pod's own annotation (downward
@@ -649,6 +686,9 @@ func BuildPod(a *store.App, cfg Config) (*corev1.Pod, error) {
 				}}},
 			},
 		},
+	}
+	if userns {
+		pod.Spec.HostUsers = ptr.To(false)
 	}
 	if cfg.Privileged {
 		pod.Spec.Volumes = append(pod.Spec.Volumes,

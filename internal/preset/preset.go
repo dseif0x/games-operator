@@ -43,12 +43,13 @@ var commonEnv = map[string]string{
 }
 
 // steamCaps are what Steam (Proton, bubblewrap, gamescope) asks for.
-// steamCaps: SYS_NICE for Steam's thread priorities, SYS_PTRACE for its
-// crash handler, SYS_RESOURCE for its limits. Proton's sandbox
-// (pressure-vessel, bwrap) runs in an unprivileged user namespace, which
-// needs no capability once the node allows it (devices.sysctls); SYS_ADMIN
-// is not granted any more, as it is a known way to root on the node.
-var steamCaps = []string{"SYS_NICE", "SYS_PTRACE", "SYS_RESOURCE"}
+// steamCaps is what GOW's own Steam container runs with. SYS_ADMIN lets
+// the launch wrapper unmask /proc (Proton's sandbox mounts a fresh /proc
+// in a user namespace, which the kernel refuses below a masked one) and
+// in a pod with its own user namespace it is scoped to that namespace:
+// no power over the node. SYS_NICE for thread priorities, SYS_PTRACE for
+// the crash handler, SYS_RESOURCE for limits.
+var steamCaps = []string{"SYS_ADMIN", "SYS_NICE", "SYS_PTRACE", "SYS_RESOURCE"}
 
 // lightCaps are enough for launchers that spawn games themselves: the
 // runtime's default set (NET_RAW, MKNOD and friends) covers them.

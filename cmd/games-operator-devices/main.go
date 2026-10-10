@@ -40,7 +40,24 @@ func run() error {
 	procDevices := envOr("DEVICES_PROC_DEVICES", "/proc/devices")
 	modules := envOr("DEVICES_MODPROBE", "")
 	sysctls := envOr("DEVICES_SYSCTL", "")
-	log.Info("games-operator-devices starting", "version", version, "cdi_dir", cdiDir, "modprobe", modules, "sysctl", sysctls)
+	seccompDir := envOr("DEVICES_SECCOMP_DIR", "/var/lib/kubelet/seccomp/games-operator")
+	// Where the node keeps its copy of the device nodes (bind-mounted into
+	// the containers); as seen from this container, and from the host.
+	hostNodes := envOr("DEVICES_HOST_NODES", "/var/lib/games-operator/dev")
+	hostNodesOnHost := envOr("DEVICES_HOST_NODES_HOSTPATH", hostNodes)
+	// The node's /dev/dri as mounted here; empty leaves the render nodes alone.
+	driDir := envOr("DEVICES_DRI_DIR", "")
+	log.Info("games-operator-devices starting", "version", version, "cdi_dir", cdiDir, "modprobe", modules, "sysctl", sysctls, "seccomp_dir", seccompDir)
+
+	// The seccomp profile the Proton presets run under (the kubelet reads
+	// Localhost profiles from its seccomp directory).
+	if seccompDir != "" {
+		if changed, err := devices.WriteSeccompProfile(seccompDir); err != nil {
+			log.Error("cannot write the seccomp profile", "err", err)
+		} else if changed {
+			log.Info("seccomp profile written", "file", seccompDir+"/"+devices.SeccompFile)
+		}
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -79,7 +96,20 @@ func run() error {
 			return
 		}
 		major := devices.HidrawMajor(string(pd))
-		if changed, err := devices.WriteSpec(cdiDir, major); err != nil {
+		if n, err := devices.CreateHostNodes(hostNodes, major); err != nil {
+			log.Error("cannot create the device nodes on the node", "dir", hostNodes, "err", err)
+			return
+		} else if n > 0 {
+			log.Info("device nodes created on the node", "dir", hostNodesOnHost, "nodes", n)
+		}
+		if driDir != "" {
+			if n, err := devices.OpenRenderNodes(driDir); err != nil {
+				log.Warn("cannot open the render nodes", "dir", driDir, "err", err)
+			} else if n > 0 {
+				log.Info("render nodes made world-accessible", "dir", driDir, "nodes", n)
+			}
+		}
+		if changed, err := devices.WriteSpec(cdiDir, major, hostNodesOnHost); err != nil {
 			log.Error("cannot write the CDI spec", "err", err)
 		} else if changed {
 			log.Info("CDI spec written", "file", cdiDir+"/"+devices.SpecFile, "hidraw_major", major)

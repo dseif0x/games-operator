@@ -41,6 +41,16 @@ spec:
               value: /var/lib/kubelet/device-plugins
             - name: DEVICES_COUNT
               value: {{ .Values.devices.count | quote }}
+            - name: DEVICES_SECCOMP_DIR
+              value: /seccomp/games-operator
+            - name: DEVICES_HOST_NODES
+              value: /host-nodes
+            - name: DEVICES_HOST_NODES_HOSTPATH
+              value: {{ .Values.devices.hostNodesDir | quote }}
+            {{- if .Values.devices.openRenderNodes }}
+            - name: DEVICES_DRI_DIR
+              value: /host-dri
+            {{- end }}
             {{- if .Values.devices.modprobe }}
             - name: DEVICES_MODPROBE
               value: {{ join "," .Values.devices.modprobe | quote }}
@@ -66,6 +76,14 @@ spec:
               mountPath: /var/lib/kubelet/device-plugins
             - name: cdi
               mountPath: /var/run/cdi
+            - name: seccomp
+              mountPath: /seccomp
+            - name: host-nodes
+              mountPath: /host-nodes
+            {{- if .Values.devices.openRenderNodes }}
+            - name: dri
+              mountPath: /host-dri
+            {{- end }}
       volumes:
         - name: device-plugin
           hostPath:
@@ -75,4 +93,18 @@ spec:
           hostPath:
             path: /var/run/cdi
             type: DirectoryOrCreate
+        - name: seccomp
+          hostPath:
+            path: {{ .Values.devices.seccompRoot }}
+            type: DirectoryOrCreate
+        - name: host-nodes
+          hostPath:
+            path: {{ .Values.devices.hostNodesDir }}
+            type: DirectoryOrCreate
+        {{- if .Values.devices.openRenderNodes }}
+        - name: dri
+          hostPath:
+            path: /dev/dri
+            type: DirectoryOrCreate
+        {{- end }}
 {{- end }}
