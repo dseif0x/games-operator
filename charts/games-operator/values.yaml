@@ -208,9 +208,15 @@ browser:
       cpu: "4"
       memory: 2Gi
   networkPolicy:
-    # -- Create the NetworkPolicy for the player: reached by the hub only,
-    # reaches DNS and addresses outside the cluster only
+    # -- Create the NetworkPolicy for the player: reached by the hub only;
+    # reaches DNS, the hub, the game pods, the ingress controller and
+    # addresses outside the cluster only
     enabled: true
+    # -- The ingress controller that serves publicUrl, through which the
+    # player calls the hub's Wolf-compatible API (k3s: Traefik in kube-system)
+    ingressController:
+      namespace: kube-system
+      podLabels: { app.kubernetes.io/name: traefik }
 
 auth:
   # -- argon2id hash for the admin user (`games-operator hash-password`); if empty a random password is generated
