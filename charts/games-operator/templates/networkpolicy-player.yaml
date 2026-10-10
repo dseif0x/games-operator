@@ -1,8 +1,11 @@
 {{- if and .Values.browser.enabled .Values.browser.networkPolicy.enabled }}
-# The embedded player holds every user's Moonlight identity and talks to
-# the hub's Wolf-compatible API and to the Moonlight door, both on the
-# LAN side. It is reached by the hub's proxy only, and it reaches DNS and
-# addresses outside the cluster only: not the database, not other pods.
+# The embedded player holds every user's Moonlight identity. It is reached
+# by the hub's proxy only, and it reaches DNS, the hub (the Moonlight door
+# and, through the ingress controller, the Wolf-compatible API), the game
+# pods (the streams) and addresses outside the cluster: not the database,
+# not other pods. The LoadBalancer addresses it dials are translated to
+# pod addresses inside the cluster, which is why the hub and the game pods
+# are allowed by label rather than by address.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -32,6 +35,22 @@ spec:
       ports:
         - { port: 53, protocol: UDP }
         - { port: 53, protocol: TCP }
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "games-operator.selectorLabels" . | nindent 14 }}
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: games-operator-app
+              app.kubernetes.io/managed-by: games-operator
+        {{- with .Values.browser.networkPolicy.ingressController }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .namespace }}
+          podSelector:
+            matchLabels:
+              {{- toYaml .podLabels | nindent 14 }}
+        {{- end }}
     - to:
         - ipBlock:
             cidr: 0.0.0.0/0
