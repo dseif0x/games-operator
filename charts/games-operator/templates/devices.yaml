@@ -12,6 +12,11 @@ spec:
   selector:
     matchLabels:
       {{- include "games-operator.devicesSelectorLabels" . | nindent 6 }}
+  # OnDelete: Helm then does not wait for every node's pod on an upgrade,
+  # which a sleeping GPU node would hold up until the upgrade timed out.
+  # The hub replaces pods that run an old image once their node is up.
+  updateStrategy:
+    type: OnDelete
   template:
     metadata:
       labels:

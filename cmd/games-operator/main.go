@@ -177,6 +177,7 @@ func run() error {
 		srv.Browser = browser.New(browser.Options{
 			Upstream: cfg.BrowserUpstream, Prefix: cfg.BrowserPath, Secret: cfg.BrowserSecret,
 			Authenticated: srv.Authenticated, LoginPath: cfg.BasePath + "/login", Log: log,
+			Rules: &browser.Rules{MoonlightAddress: cfg.LBIP, Backend: srv.BrowserBackend},
 		})
 		log.Info("proxying moonlight-web", "upstream", cfg.BrowserUpstream.String(), "path", cfg.BrowserPath)
 	}
@@ -205,6 +206,9 @@ func run() error {
 
 	go rec.Run(ctx)
 	go svc.RunPoller(ctx, cfg.StatusPollEvery)
+	if cfg.DevicesImage != "" {
+		go k8s.RunDevicePodRoller(ctx, cs, cfg.Namespace, cfg.DevicesImage, time.Minute, log)
+	}
 	go func() {
 		if err := ml.Run(ctx); err != nil {
 			errc <- fmt.Errorf("moonlight: %w", err)
