@@ -422,7 +422,13 @@ func BuildPod(a *store.App, cfg Config) (*corev1.Pod, error) {
 		Privileged:               ptr.To(cfg.Privileged),
 		AllowPrivilegeEscalation: ptr.To(true),
 		Capabilities:             &corev1.Capabilities{Add: capList},
+		SeccompProfile:           &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
 	}
+	// Unconfined (Steam, Lutris, Heroic): Proton's sandbox creates user
+	// namespaces, which the default seccomp profile only allows with
+	// SYS_ADMIN, and Ubuntu's AppArmor only allows for unconfined
+	// processes once kernel.apparmor_restrict_unprivileged_userns is off
+	// (the device plugin sets it, devices.sysctls).
 	if p.Unconfined {
 		appSec.SeccompProfile = &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeUnconfined}
 		appSec.AppArmorProfile = &corev1.AppArmorProfile{Type: corev1.AppArmorProfileTypeUnconfined}
@@ -565,8 +571,11 @@ func BuildPod(a *store.App, cfg Config) (*corev1.Pod, error) {
 					{Name: "wolf-state", MountPath: WolfStateDir},
 					{Name: "podinfo", MountPath: "/podinfo", ReadOnly: true},
 				},
-				Resources:       small("10m", "16Mi", "200m", "64Mi"),
-				SecurityContext: &corev1.SecurityContext{RunAsUser: ptr.To[int64](0), RunAsGroup: ptr.To[int64](0)},
+				Resources: small("10m", "16Mi", "200m", "64Mi"),
+				SecurityContext: &corev1.SecurityContext{
+					RunAsUser: ptr.To[int64](0), RunAsGroup: ptr.To[int64](0),
+					SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
+				},
 			}},
 			Containers: []corev1.Container{
 				{
@@ -592,9 +601,10 @@ func BuildPod(a *store.App, cfg Config) (*corev1.Pod, error) {
 						RunAsUser: ptr.To[int64](0), RunAsGroup: ptr.To[int64](0),
 						// See appSec: uinput and uhid for the virtual input devices.
 						Privileged: ptr.To(cfg.Privileged),
-						// SYS_NICE for the real-time threads; the rest is
-						// what Wolf's own container setup asks for.
-						Capabilities: &corev1.Capabilities{Add: []corev1.Capability{"NET_RAW", "MKNOD", "NET_ADMIN", "SYS_ADMIN", "SYS_NICE"}},
+						// No capabilities beyond the runtime's defaults and
+						// its seccomp profile: what Wolf's own docker setup
+						// runs with. The devices come through CDI.
+						SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
 					},
 				},
 				{
@@ -620,7 +630,8 @@ func BuildPod(a *store.App, cfg Config) (*corev1.Pod, error) {
 						RunAsUser: ptr.To[int64](0), RunAsGroup: ptr.To[int64](0),
 						AllowPrivilegeEscalation: ptr.To(false), ReadOnlyRootFilesystem: ptr.To(true),
 						// NET_ADMIN: hotplug messages are netlink multicasts.
-						Capabilities: &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}, Add: []corev1.Capability{"NET_ADMIN"}},
+						Capabilities:   &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}, Add: []corev1.Capability{"NET_ADMIN"}},
+						SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
 					},
 				},
 			},

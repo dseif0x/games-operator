@@ -130,8 +130,49 @@ func TestBuildPodFirefoxIsConfined(t *testing.T) {
 		t.Fatal("firefox does not need hostIPC")
 	}
 	a := pod.Spec.Containers[0]
-	if a.SecurityContext.SeccompProfile != nil || len(a.SecurityContext.Capabilities.Add) != 0 {
+	if a.SecurityContext.SeccompProfile == nil || a.SecurityContext.SeccompProfile.Type != corev1.SeccompProfileTypeRuntimeDefault || len(a.SecurityContext.Capabilities.Add) != 0 || a.SecurityContext.AppArmorProfile != nil {
 		t.Fatalf("firefox security: %+v", a.SecurityContext)
+	}
+}
+
+func TestNoContainerHasSysAdmin(t *testing.T) {
+	cfg := testCfg()
+	cfg.InputResource = "games-operator.io/input"
+	pod, err := BuildPod(testApp(), cfg) // the Steam preset
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range pod.Spec.Containers {
+		sc := c.SecurityContext
+		if sc.Capabilities != nil {
+			for _, cap := range sc.Capabilities.Add {
+				if cap == "SYS_ADMIN" {
+					t.Fatalf("%s must not have SYS_ADMIN", c.Name)
+				}
+			}
+		}
+		switch c.Name {
+		case ContainerWolf:
+			if sc.Capabilities != nil && len(sc.Capabilities.Add) != 0 {
+				t.Fatalf("Wolf runs with the default capabilities, got %v", sc.Capabilities.Add)
+			}
+			if sc.SeccompProfile == nil || sc.SeccompProfile.Type != corev1.SeccompProfileTypeRuntimeDefault {
+				t.Fatal("Wolf runs under the default seccomp profile")
+			}
+		case ContainerApp:
+			// Proton's sandbox: no seccomp, but the capabilities stay small.
+			if sc.SeccompProfile == nil || sc.SeccompProfile.Type != corev1.SeccompProfileTypeUnconfined {
+				t.Fatal("Steam runs without seccomp (user namespaces)")
+			}
+			if n := len(sc.Capabilities.Add); n == 0 || n > 3 {
+				t.Fatalf("Steam capabilities: %v", sc.Capabilities.Add)
+			}
+		}
+	}
+	for _, c := range pod.Spec.InitContainers {
+		if c.SecurityContext.SeccompProfile == nil {
+			t.Fatalf("%s runs under the default seccomp profile", c.Name)
+		}
 	}
 }
 

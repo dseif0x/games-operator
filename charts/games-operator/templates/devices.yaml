@@ -26,7 +26,7 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       priorityClassName: system-node-critical
-      {{- if .Values.devices.modprobe }}
+      {{- if or .Values.devices.modprobe .Values.devices.sysctls }}
       hostPID: true
       {{- end }}
       automountServiceAccountToken: false
@@ -45,11 +45,15 @@ spec:
             - name: DEVICES_MODPROBE
               value: {{ join "," .Values.devices.modprobe | quote }}
             {{- end }}
+            {{- if .Values.devices.sysctls }}
+            - name: DEVICES_SYSCTL
+              value: {{ join "," .Values.devices.sysctls | quote }}
+            {{- end }}
           resources:
             {{- toYaml .Values.devices.resources | nindent 12 }}
           securityContext:
-            {{- if .Values.devices.modprobe }}
-            # modprobe through the host's namespaces (nsenter).
+            {{- if or .Values.devices.modprobe .Values.devices.sysctls }}
+            # modprobe and sysctl through the host's namespaces (nsenter).
             privileged: true
             {{- else }}
             allowPrivilegeEscalation: false
