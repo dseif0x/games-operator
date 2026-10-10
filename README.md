@@ -41,7 +41,7 @@ For the browser: enable `browser.enabled`. The hub then serves the games-operato
 
 - A node with an NVIDIA GPU, the NVIDIA device plugin and `runtimeClassName: nvidia` (AMD/Intel work with Wolf too; set `apps.runtimeClassName` empty and pass the DRI device by other means).
 - MetalLB (or Cilium LB-IPAM) for the shared LoadBalancer IP.
-- Pod Security `privileged` on the namespace: the Proton presets run without seccomp (their sandbox needs user namespaces) and with `SYS_NICE`, `SYS_PTRACE` and `SYS_RESOURCE`; no container is `privileged` and none has `SYS_ADMIN`. The chart's device plugin hands them their input devices through CDI (containerd 1.7+, the k3s default) and relaxes Ubuntu's user-namespace restriction on the nodes. The hub itself is non-root, read-only and capability-less.
+- Pod Security `privileged` on the namespace: the Proton presets run without seccomp (their sandbox needs user namespaces) and with `SYS_NICE`, `SYS_PTRACE` and `SYS_RESOURCE`; no container is `privileged` and none has `SYS_ADMIN`. The chart's device plugin hands them their input devices through CDI (containerd 1.7+, the k3s default) and relaxes Ubuntu's user-namespace restriction on the nodes. Game pods get a NetworkPolicy that allows DNS and the internet only. The hub itself is non-root, read-only and capability-less.
 - Postgres (chart dependency or `database.existingSecret`).
 
 ## Development

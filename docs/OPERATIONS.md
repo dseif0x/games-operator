@@ -87,7 +87,7 @@ Quotas limit users (never admins): `quotas.maxApps` and `quotas.maxStorage` are 
 
 The catalog (**Admin → Catalog**) holds app definitions: preset, image, command, resources, env, capabilities and the home volume size and class the instances get. A user's instance copies the entry on every start, so changing an entry reaches running instances on their next start; a hidden entry is invisible to users but keeps its instances; deleting an entry leaves the instances detached, running what they last ran. An instance is edited through its entry only.
 
-Isolation is at the data level: a user never sees another's apps, pairings or logs. The game pods themselves are privileged and share the node, so hand out accounts to people you would let on the machine.
+Isolation is at the data level: a user never sees another's apps, pairings or logs. Game pods run unprivileged (Input devices below) and a NetworkPolicy (`apps.networkPolicy`) lets them reach DNS and the internet only, not the hub's API, the database or other pods (nor the hub's own LoadBalancer IP, which maps to a pod; `extraEgress` opens in-cluster services such as a game cache); they still share the node's kernel and GPU, so hand out accounts to people you would let on the machine.
 
 ## Input devices
 
