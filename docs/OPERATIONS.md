@@ -80,6 +80,7 @@ A launch creates a pod requesting `nvidia.com/gpu`; a pending pod is what node a
 - `/cancel` while the app is `starting` is ignored, with an event on the app. Only a running app is quit by `/cancel`.
 - **Start** in the UI (`POST /api/v1/apps/{id}/start`) warms an app up without a client: the pod comes up and the app shows *Ready*. A launch then streams at once. Use it before sitting down to play, or when the node is asleep.
 - After the stream ends, or if no client ever comes, the app is stopped `apps.idleStopAfter` later (default 15 min), the pod disappears and the node can power off.
+- **Keep running** on the app page (1, 4, 12 or 24 h; `POST /api/v1/apps/{id}/keep` with `{"hours": n}`, 0 cancels) sets a deadline the idle stop respects, for a download or an update nobody streams. It is a column the poller reads, so it applies to a running app at once without restarting the pod; the hub's Stop button still works.
 
 ## Users, roles and quotas
 

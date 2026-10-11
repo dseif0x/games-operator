@@ -46,6 +46,10 @@ func copyApp(a *App) *App {
 		s := *a.Stream
 		c.Stream = &s
 	}
+	if a.KeepUntil != nil {
+		k := *a.KeepUntil
+		c.KeepUntil = &k
+	}
 	return &c
 }
 
@@ -490,6 +494,21 @@ func (r memApps) TouchActive(_ context.Context, id string, at time.Time) error {
 		a.LastActiveAt = &at
 	}
 	return nil
+}
+
+func (r memApps) SetKeepUntil(_ context.Context, id string, until *time.Time) (*App, error) {
+	r.m.mu.Lock()
+	defer r.m.mu.Unlock()
+	cur, err := r.get(id)
+	if err != nil {
+		return nil, err
+	}
+	cur.KeepUntil = nil
+	if until != nil {
+		k := *until
+		cur.KeepUntil = &k
+	}
+	return copyApp(cur), nil
 }
 
 func (r memApps) Delete(_ context.Context, id string) error {

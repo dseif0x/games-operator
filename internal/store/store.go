@@ -131,6 +131,9 @@ type App struct {
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
 	LastActiveAt  *time.Time
+	// KeepUntil keeps the app running past the idle stop until then (nil:
+	// the idle stop applies).
+	KeepUntil *time.Time
 }
 
 // Stream is what a Moonlight launch request carries.
@@ -221,6 +224,8 @@ type Apps interface {
 	// ClearRuntime forgets slot, Wolf session and stream URL (app stopped).
 	ClearRuntime(ctx context.Context, id string) (*App, error)
 	TouchActive(ctx context.Context, id string, at time.Time) error
+	// SetKeepUntil sets or clears (nil) the keep-running deadline.
+	SetKeepUntil(ctx context.Context, id string, until *time.Time) (*App, error)
 	Delete(ctx context.Context, id string) error
 	// UsedSlots lists the slots held by apps that are not stopped.
 	UsedSlots(ctx context.Context) ([]int, error)

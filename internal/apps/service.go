@@ -128,6 +128,8 @@ type View struct {
 	CreatedAt    time.Time   `json:"created_at"`
 	UpdatedAt    time.Time   `json:"updated_at"`
 	LastActiveAt *time.Time  `json:"last_active_at"`
+	// KeepUntil: the idle stop leaves the app alone until then.
+	KeepUntil *time.Time `json:"keep_until"`
 }
 
 // StreamView is the non-secret part of the current stream.
@@ -147,7 +149,7 @@ func (s *Service) View(a *store.App) View {
 		Command: a.Command, PVCSize: a.PVCSize, StorageClass: a.StorageClass, Resources: a.Resources, Env: a.Env, HostIPC: a.HostIPC,
 		Capabilities: a.Capabilities, State: a.State, StateReason: a.StateReason, Slot: a.Slot, StreamURL: a.StreamURL,
 		Streaming: a.State == store.StateRunning && a.WolfSessionID != "" && a.Stream != nil,
-		PodName:   reconcile.ObjectName(a.ID), CreatedAt: a.CreatedAt, UpdatedAt: a.UpdatedAt, LastActiveAt: a.LastActiveAt,
+		PodName:   reconcile.ObjectName(a.ID), CreatedAt: a.CreatedAt, UpdatedAt: a.UpdatedAt, LastActiveAt: a.LastActiveAt, KeepUntil: a.KeepUntil,
 	}
 	if v.Env == nil {
 		v.Env = map[string]string{}
@@ -672,6 +674,35 @@ func (s *Service) Cancel(ctx context.Context, user *store.User) error {
 	return nil
 }
 
+// MaxKeep bounds how long an app can be kept running past the idle stop.
+const MaxKeep = 24 * time.Hour
+
+// Keep keeps the app running for d past now, whatever the idle stop
+// says (a download, an update nobody streams); d <= 0 clears it.
+func (s *Service) Keep(ctx context.Context, user *store.User, id string, d time.Duration) (*store.App, error) {
+	a, err := s.Get(ctx, user.ID, id)
+	if err != nil {
+		return nil, err
+	}
+	if d > MaxKeep {
+		return nil, &ValidationError{fmt.Sprintf("an app can be kept running for at most %s", MaxKeep)}
+	}
+	var until *time.Time
+	msg := "keep running cleared; the idle stop applies"
+	if d > 0 {
+		t := s.clock().Add(d)
+		until = &t
+		msg = "kept running until " + t.UTC().Format(time.RFC3339)
+	}
+	updated, err := s.Store.Apps().SetKeepUntil(ctx, a.ID, until)
+	if err != nil {
+		return nil, err
+	}
+	_ = s.Store.Events().Add(ctx, a.ID, "user", msg)
+	s.publish(ctx, updated)
+	return updated, nil
+}
+
 // ---- notifier ----
 
 func (s *Service) publish(ctx context.Context, a *store.App) {
@@ -733,6 +764,9 @@ func (s *Service) PollOnce(ctx context.Context) {
 		}
 		if s.IdleStopAfter <= 0 {
 			continue
+		}
+		if a.KeepUntil != nil && a.KeepUntil.After(now) {
+			continue // kept running on purpose (a download, an update)
 		}
 		last := a.UpdatedAt
 		if a.LastActiveAt != nil && a.LastActiveAt.After(last) {

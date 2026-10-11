@@ -226,6 +226,45 @@ func TestIdleStop(t *testing.T) {
 	}
 }
 
+func TestKeepRunning(t *testing.T) {
+	s, u, orch := newService(t)
+	ctx := context.Background()
+	s.IdleStopAfter = 15 * time.Minute
+	a, _ := s.Create(ctx, u, CreateRequest{Name: "Steam", Preset: "steam"})
+	started, err := s.Start(ctx, u, a.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	s.now = func() time.Time { return now }
+	// Kept for 4h on the running app, nothing restarts: the pod's generation
+	// is untouched and only the deadline changes.
+	kept, err := s.Keep(ctx, u, a.ID, 4*time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kept.KeepUntil == nil || !kept.KeepUntil.Equal(now.Add(4*time.Hour)) || kept.Generation != started.Generation {
+		t.Fatalf("keep_until %v generation %d", kept.KeepUntil, kept.Generation)
+	}
+	orch.status = bridge.Status{Ready: true, Streaming: false, Since: now}
+	s.now = func() time.Time { return now.Add(3 * time.Hour) }
+	s.PollOnce(ctx)
+	if cur, _ := s.Get(ctx, u.ID, a.ID); cur.State != store.StateRunning {
+		t.Fatal("a kept app must survive the idle stop")
+	}
+	s.now = func() time.Time { return now.Add(5 * time.Hour) }
+	s.PollOnce(ctx)
+	if cur, _ := s.Get(ctx, u.ID, a.ID); cur.State != store.StateStopped {
+		t.Fatalf("after the deadline the idle stop applies, is %s", cur.State)
+	}
+	if _, err := s.Keep(ctx, u, a.ID, 48*time.Hour); err == nil {
+		t.Fatal("48h is over MaxKeep")
+	}
+	if cur, err := s.Keep(ctx, u, a.ID, 0); err != nil || cur.KeepUntil != nil {
+		t.Fatalf("clearing: %v %v", err, cur.KeepUntil)
+	}
+}
+
 func TestSlotsExhausted(t *testing.T) {
 	s, u, _ := newService(t)
 	ctx := context.Background()
