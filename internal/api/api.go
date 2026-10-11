@@ -118,6 +118,7 @@ func (s *Server) hubMux() *http.ServeMux {
 	authed.HandleFunc("POST /api/v1/apps/{id}/start", s.startApp)
 	authed.HandleFunc("POST /api/v1/apps/{id}/play", s.playApp)
 	authed.HandleFunc("POST /api/v1/apps/{id}/stop", s.stopApp)
+	authed.HandleFunc("POST /api/v1/apps/{id}/keep", s.keepApp)
 	authed.HandleFunc("GET /api/v1/apps/{id}/events", s.appEventLog)
 	authed.HandleFunc("GET /api/v1/apps/{id}/logs", s.appLogs)
 	authed.HandleFunc("GET /api/v1/pairings", s.listPairings)
@@ -604,6 +605,29 @@ func (s *Server) stopApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusAccepted, s.Apps.View(a))
+}
+
+// keepApp keeps the app running past the idle stop for the given hours
+// (0 clears it).
+func (s *Server) keepApp(w http.ResponseWriter, r *http.Request) {
+	p := principal(r)
+	var body struct {
+		Hours float64 `json:"hours"`
+	}
+	if err := decode(r, &body); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if body.Hours < 0 {
+		writeErr(w, http.StatusBadRequest, "hours must be 0 or more")
+		return
+	}
+	a, err := s.Apps.Keep(r.Context(), p.User, r.PathValue("id"), time.Duration(body.Hours*float64(time.Hour)))
+	if err != nil {
+		s.mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, s.Apps.View(a))
 }
 
 func (s *Server) appEventLog(w http.ResponseWriter, r *http.Request) {

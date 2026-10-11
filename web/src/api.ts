@@ -27,17 +27,22 @@ export interface User {
   usage?: Usage;
 }
 
-export const isAdmin = (u: User | null | undefined) => !!u && u.role === "admin";
+export const isAdmin = (u: User | null | undefined) =>
+  !!u && u.role === "admin";
 
 /** A Kubernetes-style resource list: cpu, memory and extended resources such as nvidia.com/gpu. */
-export type ResourceList = { cpu?: string; memory?: string } & Record<string, string | undefined>;
+export type ResourceList = { cpu?: string; memory?: string } & Record<
+  string,
+  string | undefined
+>;
 
 export interface Resources {
   requests: ResourceList;
   limits: ResourceList;
 }
 
-export type AppState = "stopped" | "starting" | "running" | "stopping" | "failed" | "deleting";
+export type AppState =
+  "stopped" | "starting" | "running" | "stopping" | "failed" | "deleting";
 
 export interface StreamInfo {
   client_ip: string;
@@ -77,6 +82,8 @@ export interface App {
   created_at: string;
   updated_at: string;
   last_active_at: string | null;
+  /** The idle stop leaves the app alone until then. */
+  keep_until: string | null;
 }
 
 export interface Preset {
@@ -177,7 +184,10 @@ export interface CreateAppRequest {
 }
 
 export class ApiError extends Error {
-  constructor(public status: number, message: string) {
+  constructor(
+    public status: number,
+    message: string,
+  ) {
     super(message);
   }
 }
@@ -188,7 +198,11 @@ export function setCsrf(token: string) {
   csrf = token;
 }
 
-async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+async function request<T>(
+  method: string,
+  path: string,
+  body?: unknown,
+): Promise<T> {
   const headers: Record<string, string> = { Accept: "application/json" };
   if (body !== undefined) headers["Content-Type"] = "application/json";
   if (method !== "GET" && csrf) headers["X-CSRF-Token"] = csrf;
@@ -206,7 +220,10 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     data = { error: text };
   }
   if (!res.ok) {
-    const msg = (data as { error?: string } | null)?.error || res.statusText || `HTTP ${res.status}`;
+    const msg =
+      (data as { error?: string } | null)?.error ||
+      res.statusText ||
+      `HTTP ${res.status}`;
     throw new ApiError(res.status, msg);
   }
   return data as T;
@@ -214,20 +231,37 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 
 export const api = {
   login: (username: string, password: string) =>
-    request<{ user: User; csrf: string }>("POST", "/auth/login", { username, password }),
+    request<{ user: User; csrf: string }>("POST", "/auth/login", {
+      username,
+      password,
+    }),
   logout: () => request<{ ok: boolean }>("POST", "/auth/logout"),
   me: () => request<{ user: User; csrf: string }>("GET", "/auth/me"),
 
-  apps: () => request<{ apps: App[]; presets: Preset[]; defaults: Defaults }>("GET", "/apps"),
+  apps: () =>
+    request<{ apps: App[]; presets: Preset[]; defaults: Defaults }>(
+      "GET",
+      "/apps",
+    ),
   app: (id: string) => request<App>("GET", `/apps/${id}`),
   createApp: (req: CreateAppRequest) => request<App>("POST", "/apps", req),
-  updateApp: (id: string, req: CreateAppRequest) => request<App>("PATCH", `/apps/${id}`, req),
+  updateApp: (id: string, req: CreateAppRequest) =>
+    request<App>("PATCH", `/apps/${id}`, req),
   deleteApp: (id: string) => request<App>("DELETE", `/apps/${id}`),
   startApp: (id: string) => request<App>("POST", `/apps/${id}/start`),
   stopApp: (id: string) => request<App>("POST", `/apps/${id}/stop`),
-  appEvents: (id: string) => request<{ events: AppEvent[] }>("GET", `/apps/${id}/events`),
+  /** Keep the app running past the idle stop for `hours` (0 clears it). */
+  keepApp: (id: string, hours: number) =>
+    request<App>("POST", `/apps/${id}/keep`, { hours }),
+  appEvents: (id: string) =>
+    request<{ events: AppEvent[] }>("GET", `/apps/${id}/events`),
   appLogs: async (id: string, container: string) => {
-    const res = await fetch(href(`/api/v1/apps/${id}/logs?container=${encodeURIComponent(container)}`), { credentials: "same-origin" });
+    const res = await fetch(
+      href(
+        `/api/v1/apps/${id}/logs?container=${encodeURIComponent(container)}`,
+      ),
+      { credentials: "same-origin" },
+    );
     const text = await res.text();
     if (!res.ok) {
       try {
@@ -240,24 +274,47 @@ export const api = {
     return text;
   },
 
-  pairings: () => request<{ pairings: Pairing[]; pending: PendingPair[] }>("GET", "/pairings"),
-  submitPin: (secret: string, pin: string) => request<{ ok: boolean }>("POST", "/pairings/pin", { secret, pin }),
-  deletePairing: (id: string) => request<{ ok: boolean }>("DELETE", `/pairings/${id}`),
+  pairings: () =>
+    request<{ pairings: Pairing[]; pending: PendingPair[] }>(
+      "GET",
+      "/pairings",
+    ),
+  submitPin: (secret: string, pin: string) =>
+    request<{ ok: boolean }>("POST", "/pairings/pin", { secret, pin }),
+  deletePairing: (id: string) =>
+    request<{ ok: boolean }>("DELETE", `/pairings/${id}`),
 
-  newApiToken: () => request<{ token: string; api_url: string }>("POST", "/me/api-token"),
+  newApiToken: () =>
+    request<{ token: string; api_url: string }>("POST", "/me/api-token"),
   deleteApiToken: () => request<{ ok: boolean }>("DELETE", "/me/api-token"),
   changePassword: (current_password: string, new_password: string) =>
-    request<{ ok: boolean }>("POST", "/me/password", { current_password, new_password }),
+    request<{ ok: boolean }>("POST", "/me/password", {
+      current_password,
+      new_password,
+    }),
 
-  catalog: () => request<{ templates: Template[]; presets: Preset[]; defaults: Defaults }>("GET", "/catalog"),
-  createTemplate: (req: CreateAppRequest) => request<Template>("POST", "/catalog", req),
-  updateTemplate: (id: string, req: CreateAppRequest) => request<Template>("PATCH", `/catalog/${id}`, req),
-  deleteTemplate: (id: string) => request<{ ok: boolean }>("DELETE", `/catalog/${id}`),
+  catalog: () =>
+    request<{ templates: Template[]; presets: Preset[]; defaults: Defaults }>(
+      "GET",
+      "/catalog",
+    ),
+  createTemplate: (req: CreateAppRequest) =>
+    request<Template>("POST", "/catalog", req),
+  updateTemplate: (id: string, req: CreateAppRequest) =>
+    request<Template>("PATCH", `/catalog/${id}`, req),
+  deleteTemplate: (id: string) =>
+    request<{ ok: boolean }>("DELETE", `/catalog/${id}`),
 
-  users: () => request<{ users: User[]; defaults: { max_apps: number; max_storage: string } }>("GET", "/users"),
+  users: () =>
+    request<{
+      users: User[];
+      defaults: { max_apps: number; max_storage: string };
+    }>("GET", "/users"),
   createUser: (req: UserRequest) => request<User>("POST", "/users", req),
-  updateUser: (id: string, req: UserRequest) => request<User>("PATCH", `/users/${id}`, req),
-  deleteUser: (id: string) => request<{ ok: boolean }>("DELETE", `/users/${id}`),
+  updateUser: (id: string, req: UserRequest) =>
+    request<User>("PATCH", `/users/${id}`, req),
+  deleteUser: (id: string) =>
+    request<{ ok: boolean }>("DELETE", `/users/${id}`),
 
   allApps: () => request<{ apps: OwnedApp[] }>("GET", "/admin/apps"),
   stopAnyApp: (id: string) => request<App>("POST", `/admin/apps/${id}/stop`),
@@ -265,13 +322,19 @@ export const api = {
 };
 
 /** Subscribe to app state changes over SSE (every user's with `all`). Returns a stop function. */
-export function subscribeApps(onEvent: (type: "app" | "deleted", id: string, app?: App) => void, onOpen?: () => void, all = false): () => void {
+export function subscribeApps(
+  onEvent: (type: "app" | "deleted", id: string, app?: App) => void,
+  onOpen?: () => void,
+  all = false,
+): () => void {
   let es: EventSource | null = null;
   let stopped = false;
   let retry = 1000;
   const connect = () => {
     if (stopped) return;
-    es = new EventSource(href(all ? "/api/v1/admin/events" : "/api/v1/apps/events"));
+    es = new EventSource(
+      href(all ? "/api/v1/admin/events" : "/api/v1/apps/events"),
+    );
     es.onopen = () => {
       retry = 1000;
       onOpen?.();

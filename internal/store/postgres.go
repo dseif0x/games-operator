@@ -331,14 +331,14 @@ type pgApps struct{ pool *pgxpool.Pool }
 
 const appCols = `id, owner_id, moonlight_id, name, preset, image, icon_url, hdr, command, pvc_size, storage_class,
 	resources, env, host_ipc, capabilities, state, state_reason, generation, stream, slot, wolf_session_id, stream_url,
-	created_at, updated_at, last_active_at, template_id`
+	created_at, updated_at, last_active_at, template_id, keep_until`
 
 func scanApp(row pgx.Row) (*App, error) {
 	var a App
 	var template *string
 	err := row.Scan(&a.ID, &a.OwnerID, &a.MoonlightID, &a.Name, &a.Preset, &a.Image, &a.IconURL, &a.HDR, &a.Command, &a.PVCSize, &a.StorageClass,
 		&a.Resources, &a.Env, &a.HostIPC, &a.Capabilities, &a.State, &a.StateReason, &a.Generation, &a.Stream, &a.Slot, &a.WolfSessionID, &a.StreamURL,
-		&a.CreatedAt, &a.UpdatedAt, &a.LastActiveAt, &template)
+		&a.CreatedAt, &a.UpdatedAt, &a.LastActiveAt, &template, &a.KeepUntil)
 	if err != nil {
 		return nil, mapErr(err)
 	}
@@ -395,10 +395,10 @@ func (r pgApps) Create(ctx context.Context, a *App) error {
 	}
 	normaliseApp(a)
 	_, err := r.pool.Exec(ctx, `INSERT INTO apps (`+appCols+`) VALUES
-		($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26)`,
+		($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27)`,
 		a.ID, a.OwnerID, a.MoonlightID, a.Name, a.Preset, a.Image, a.IconURL, a.HDR, a.Command, a.PVCSize, a.StorageClass,
 		a.Resources, a.Env, a.HostIPC, a.Capabilities, a.State, a.StateReason, a.Generation, a.Stream, a.Slot, a.WolfSessionID, a.StreamURL,
-		a.CreatedAt, a.UpdatedAt, a.LastActiveAt, nullable(a.TemplateID))
+		a.CreatedAt, a.UpdatedAt, a.LastActiveAt, nullable(a.TemplateID), a.KeepUntil)
 	return mapErr(err)
 }
 
@@ -463,6 +463,10 @@ func (r pgApps) ClearRuntime(ctx context.Context, id string) (*App, error) {
 func (r pgApps) TouchActive(ctx context.Context, id string, at time.Time) error {
 	_, err := r.pool.Exec(ctx, `UPDATE apps SET last_active_at=$2 WHERE id=$1 AND (last_active_at IS NULL OR last_active_at < $2)`, id, at)
 	return mapErr(err)
+}
+
+func (r pgApps) SetKeepUntil(ctx context.Context, id string, until *time.Time) (*App, error) {
+	return scanApp(r.pool.QueryRow(ctx, `UPDATE apps SET keep_until=$2 WHERE id=$1 RETURNING `+appCols, id, until))
 }
 
 func (r pgApps) Delete(ctx context.Context, id string) error {
