@@ -301,8 +301,8 @@ func TestLaunchWhileStartingKeepsPod(t *testing.T) {
 	if err := s.Cancel(ctx, u); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := s.Get(ctx, u.ID, a.ID); got.State != store.StateStarting {
-		t.Fatalf("cancel while starting must keep the app starting: %s", got.State)
+	if got, _ := s.Get(ctx, u.ID, a.ID); got.State != store.StateStarting || got.Stream != nil {
+		t.Fatalf("cancel while starting must keep the app starting and drop the keys: %s %+v", got.State, got.Stream)
 	}
 	// A retry with new keys updates the pending stream; the stream that
 	// comes up must match the client that waits now.

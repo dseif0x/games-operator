@@ -75,7 +75,12 @@ type AppEntry struct {
 type LaunchResponse struct {
 	Response
 	RTSPSessionURL string `xml:"sessionUrl0"`
-	GameSession    int    `xml:"gamesession"`
+	// GameSession answers /launch and Resume answers /resume (both 1):
+	// Moonlight's iOS/tvOS client reads only the tag for the verb it sent and
+	// reports "Failed to resume app" without <resume>, as GameStream and
+	// Sunshine send it.
+	GameSession int `xml:"gamesession,omitempty"`
+	Resume      int `xml:"resume,omitempty"`
 }
 
 // PairingResponse answers the /pair phases.

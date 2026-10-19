@@ -28,7 +28,7 @@ type Launcher interface {
 	// Launch starts the app (or re-keys the running one when resume is set)
 	// and blocks until the stream URL is known or ctx ends.
 	Launch(ctx context.Context, user *store.User, pairing *store.Pairing, moonlightID int32, stream store.Stream, resume bool) (string, error)
-	// Cancel stops the user's running app.
+	// Cancel ends the user's stream; the app itself keeps running.
 	Cancel(ctx context.Context, user *store.User) error
 }
 
@@ -198,7 +198,12 @@ func (s *Server) serverInfo(w http.ResponseWriter, r *http.Request) {
 	pairStatus, state, currentGame := 0, "SUNSHINE_SERVER_FREE", "0"
 	if u := userOf(r); u != nil {
 		pairStatus = 1
-		if cur, err := s.launcher.Current(r.Context(), u.ID); err == nil && cur != nil {
+		// Busy only while a client streams it: an app that keeps running
+		// after /cancel (see apps.Service.Cancel) shows as free, so a
+		// client's Quit succeeds (Moonlight re-reads this and reports "Failed
+		// to quit app" on _SERVER_BUSY) and its next /launch re-keys the
+		// running app exactly as /resume would.
+		if cur, err := s.launcher.Current(r.Context(), u.ID); err == nil && cur != nil && cur.Stream != nil {
 			state = "SUNSHINE_SERVER_BUSY"
 			currentGame = strconv.Itoa(int(cur.MoonlightID))
 		}
@@ -363,7 +368,11 @@ func (s *Server) launchOrResume(w http.ResponseWriter, r *http.Request, resume b
 		writeError(w, s.log, 500, fmt.Errorf("launch %s: %w", app.Name, err))
 		return
 	}
-	sendXML(w, s.log, LaunchResponse{Response: Response{StatusCode: 200}, RTSPSessionURL: url, GameSession: 1})
+	resp := LaunchResponse{Response: Response{StatusCode: 200}, RTSPSessionURL: url, GameSession: 1}
+	if resume {
+		resp.GameSession, resp.Resume = 0, 1
+	}
+	sendXML(w, s.log, resp)
 }
 
 func (s *Server) cancel(w http.ResponseWriter, r *http.Request) {

@@ -62,7 +62,7 @@ The player uses moonlight-web's WebSocket transport by default (`browser.transpo
 
 The player asks for H.264 by default (`browser.codec: h264`); `auto` lets moonlight-web negotiate HEVC or AV1, and a browser that cannot decode what it claimed (desktop Firefox and HEVC) makes it re-launch the session with H.264, a resume Wolf handles without disturbing the app.
 
-A client's `/cancel` ends its stream and never stops the app: clients send it after a launch they gave up on, before a fallback re-launch, and for Quit alike. The idle stop reclaims the app, and the hub's Stop button is explicit.
+A client's `/cancel` ends its stream and never stops the app: clients send it after a launch they gave up on, before a fallback re-launch, and for Quit alike. The idle stop reclaims the app, and the hub's Stop button is explicit. `/serverinfo` reports the host busy (with the app as `currentgame`) only while a client holds a stream, so Moonlight's Quit, which re-reads it and reports "Failed to quit app" on a busy host, succeeds; the next launch re-keys the app that kept running. `/resume` answers `<resume>1</resume>` and `/launch` `<gamesession>1</gamesession>`; the iOS and tvOS client checks the tag of the verb it sent.
 
 **Resuming keeps the app.** Streams are started through Wolf's own Moonlight HTTPS side: the hub is a paired client of every Wolf (its client certificate is written into each pod's Wolf config), and a client reconnecting, a browser reload or a transport or codec fallback becomes a Wolf resume, which creates the session with the new keys but keeps the compositor and the input devices. The app never notices.
 
@@ -74,10 +74,10 @@ moonlight-web presents one client certificate per browser and hub user (the fork
 
 ## GPU node that sleeps, and client timeouts
 
-A launch creates a pod requesting `nvidia.com/gpu`; a pending pod is what node auto-provisioners react to. Booting a node and pulling the images takes minutes, while Moonlight clients give `/launch` 20 s (moonlight-web) to two minutes (Moonlight Qt) and then send `/cancel`. The hub is built for that:
+A launch creates a pod requesting `nvidia.com/gpu`; a pending pod is what node auto-provisioners react to. Booting a node and pulling the images takes minutes, while Moonlight clients give `/launch` 20 s (moonlight-web), 60 s (Moonlight on iOS and Apple TV) or two minutes (Moonlight Qt) and then send `/cancel`. The hub is built for that:
 
 - `/launch` holds the request until the stream is up or the client goes away. While the app is `starting`, every retry replaces the pending stream keys, so the stream that comes up matches the client that is waiting now.
-- `/cancel` while the app is `starting` is ignored, with an event on the app. Only a running app is quit by `/cancel`.
+- `/cancel` while the app is `starting` drops the client's stream keys, with an event on the app; the app keeps starting and then waits for a client, like one warmed up with **Start**. Launching again, once the node is up, streams at once (on Moonlight for Apple TV: wait a minute after the timeout, then select the app again).
 - **Start** in the UI (`POST /api/v1/apps/{id}/start`) warms an app up without a client: the pod comes up and the app shows *Ready*. A launch then streams at once. Use it before sitting down to play, or when the node is asleep.
 - After the stream ends, or if no client ever comes, the app is stopped `apps.idleStopAfter` later (default 15 min), the pod disappears and the node can power off.
 - **Keep running** on the app page (1, 4, 12 or 24 h; `POST /api/v1/apps/{id}/keep` with `{"hours": n}`, 0 cancels) sets a deadline the idle stop respects, for a download or an update nobody streams. It is a column the poller reads, so it applies to a running app at once without restarting the pod; the hub's Stop button still works.
