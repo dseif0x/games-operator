@@ -655,17 +655,20 @@ func (s *Service) Cancel(ctx context.Context, user *store.User) error {
 	// the pod on any of those throws away the node that just woke up or the
 	// game that is running; the idle stop reclaims an app nobody comes back
 	// to, and the hub's Stop button is explicit. The stream parameters are
-	// cleared so the app shows as ready, not streaming; Wolf's session stays
-	// until the next launch replaces it.
-	if cur.State == store.StateStarting {
-		_ = s.Store.Events().Add(ctx, cur.ID, "moonlight", "cancel while starting ignored; the app keeps starting")
-		return nil
-	}
+	// cleared so the app shows as ready, not streaming, and Moonlight sees
+	// the host as free, so its Quit succeeds; Wolf's session stays until the
+	// next launch replaces it. A starting app keeps starting and then waits
+	// for a client, like one warmed up with Start; a client that launches
+	// again before then sets its keys anew.
 	if cur.Stream != nil {
 		if _, err := s.Store.Apps().SetStream(ctx, cur.ID, nil); err != nil {
 			return err
 		}
-		_ = s.Store.Events().Add(ctx, cur.ID, "moonlight", "stream ended by the client; the app keeps running")
+		msg := "stream ended by the client; the app keeps running"
+		if cur.State == store.StateStarting {
+			msg = "launch given up by the client; the app keeps starting and then waits for a client"
+		}
+		_ = s.Store.Events().Add(ctx, cur.ID, "moonlight", msg)
 		s.Orch.Notify(cur.ID)
 		if updated, err := s.Store.Apps().Get(ctx, cur.ID); err == nil {
 			s.publish(ctx, updated)
