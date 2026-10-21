@@ -2,6 +2,35 @@ apiVersion: v1
 entries:
   games-operator:
   - apiVersion: v2
+    appVersion: 0.13.2
+    created: "2026-10-21T10:57:01.577452038Z"
+    dependencies:
+    - condition: postgresql.enabled
+      name: postgresql
+      repository: oci://registry-1.docker.io/bitnamicharts
+      version: 18.12.4
+    description: Game streaming on Kubernetes. Moonlight-compatible host whose apps
+      run as pods next to Wolf, with moonlight-web for the browser.
+    digest: 03d01b94f8ac5198d76d2241e7a85ec65ca8b899b29c8249ec25c948f0c30c63
+    home: https://github.com/dseif0x/games-operator
+    keywords:
+    - games
+    - moonlight
+    - wolf
+    - streaming
+    kubeVersion: '>=1.27.0-0'
+    maintainers:
+    - name: dseif0x
+      url: https://github.com/dseif0x
+    name: games-operator
+    sources:
+    - https://github.com/dseif0x/games-operator
+    - https://github.com/games-on-whales/wolf
+    type: application
+    urls:
+    - https://github.com/dseif0x/games-operator/releases/download/v0.13.2/games-operator-0.13.2.tgz
+    version: 0.13.2
+  - apiVersion: v2
     appVersion: 0.13.1
     created: "2026-10-19T10:56:53.184518514Z"
     dependencies:
@@ -900,4 +929,4 @@ entries:
     urls:
     - https://github.com/dseif0x/games-operator/releases/download/v0.1.0/games-operator-0.1.0.tgz
     version: 0.1.0
-generated: "2026-10-19T10:56:53.184692334Z"
+generated: "2026-10-21T10:57:01.577661652Z"
