@@ -200,6 +200,8 @@ browser:
   size: 1Gi
   # -- StorageClass for /data
   storageClass: ""
+  # -- Use this existing PVC for /data instead of creating <release>-moonlight-web (kept on switch: helm.sh/resource-policy: keep)
+  existingClaim: ""
   resources:
     requests:
       cpu: 250m
@@ -233,6 +235,8 @@ persistence:
   size: 100Mi
   # -- StorageClass for the hub's data volume (empty = cluster default)
   storageClass: ""
+  # -- Use this existing PVC instead of creating <release>-data (e.g. a copy on another StorageClass). The chart's PVC is annotated helm.sh/resource-policy: keep, so it stays behind when this is set.
+  existingClaim: ""
 
 ingress:
   # -- Create an Ingress for the web UI

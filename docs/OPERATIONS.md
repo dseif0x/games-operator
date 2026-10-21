@@ -112,7 +112,7 @@ A GPU that falls off the bus (NVIDIA Xid 79) or a node reboot under a running po
 
 ## Storage
 
-Game libraries are large and re-downloadable: put app home volumes on the GPU node's local disk (`apps.storageClass: local-path`) rather than NFS. The hub's own volume (`persistence.*`, 100Mi) holds the Moonlight server certificate; losing it un-pairs every client.
+Game libraries are large and re-downloadable: put app home volumes on the GPU node's local disk (`apps.storageClass: local-path`) rather than NFS. The hub's own volume (`persistence.*`, 100Mi) holds the Moonlight server certificate; losing it un-pairs every client. To move it (or moonlight-web's `browser.*` volume) to another StorageClass, copy the data into a new PVC and set `persistence.existingClaim` / `browser.existingClaim`; the chart's own PVCs are annotated `helm.sh/resource-policy: keep`, so they stay behind as the rollback copy.
 
 ## Troubleshooting
 

@@ -64,7 +64,8 @@ spec:
       volumes:
         - name: data
           persistentVolumeClaim:
-            claimName: {{ include "games-operator.fullname" . }}-moonlight-web
+            claimName: {{ .Values.browser.existingClaim | default (printf "%s-moonlight-web" (include "games-operator.fullname" .)) }}
+{{- if not .Values.browser.existingClaim }}
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -82,6 +83,7 @@ spec:
   resources:
     requests:
       storage: {{ .Values.browser.size }}
+{{- end }}
 ---
 apiVersion: v1
 kind: Service
