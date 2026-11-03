@@ -72,6 +72,14 @@ func TestBuildPod(t *testing.T) {
 	if pod.Annotations["games-operator.io/generation"] != "3" || pod.Spec.HostIPC || *pod.Spec.RuntimeClassName != "nvidia" {
 		t.Fatalf("pod meta: %+v", pod.Spec)
 	}
+	if pod.Spec.PriorityClassName != "" {
+		t.Fatalf("priority class without config: %q", pod.Spec.PriorityClassName)
+	}
+	cfg := testCfg()
+	cfg.PriorityClass = "gpu-interactive"
+	if p, err := BuildPod(app, cfg); err != nil || p.Spec.PriorityClassName != "gpu-interactive" {
+		t.Fatalf("priority class: %v %q", err, p.Spec.PriorityClassName)
+	}
 	names := map[string]corev1.Container{}
 	for _, c := range pod.Spec.Containers {
 		names[c.Name] = c

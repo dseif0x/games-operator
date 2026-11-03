@@ -130,6 +130,9 @@ type Config struct {
 	BridgeImageTag  string
 	ImagePullPolicy string
 	RuntimeClass    string
+	// PriorityClass is the priorityClassName of app pods: with one GPU and
+	// no time-slicing, it decides which GPU workload may push out another.
+	PriorityClass string
 	// WolfGPURequest also asks for one nvidia.com/gpu for the wolf container
 	// (needed when the device plugin does not honour NVIDIA_VISIBLE_DEVICES).
 	WolfGPURequest bool
@@ -302,6 +305,7 @@ func load(get lookup) (*Config, error) {
 		BridgeImageTag:      str("BRIDGE_IMAGE_TAG", "latest"),
 		ImagePullPolicy:     str("IMAGE_PULL_POLICY", "IfNotPresent"),
 		RuntimeClass:        str("RUNTIME_CLASS", ""),
+		PriorityClass:       str("PRIORITY_CLASS", ""),
 		WolfGPURequest:      boolean("WOLF_GPU_REQUEST", false),
 		RenderNode:          str("RENDER_NODE", ""),
 		TimeZone:            str("TIMEZONE", "Etc/UTC"),

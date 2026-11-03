@@ -51,6 +51,8 @@ apps:
   pullPolicy: IfNotPresent
   # -- runtimeClassName for app pods; `nvidia` makes the GPU and driver libraries visible to every container (via NVIDIA_VISIBLE_DEVICES=all)
   runtimeClassName: nvidia
+  # -- priorityClassName for app pods (e.g. to let a game push a lower-priority GPU workload off a single, non-time-sliced GPU); empty: none
+  priorityClassName: ""
   # -- Also request one `nvidia.com/gpu` for the wolf container (only needed when the device plugin ignores NVIDIA_VISIBLE_DEVICES; costs a second GPU slot unless time-slicing is on)
   wolfGpuRequest: false
   # -- Seccomp profile for the Proton presets (Steam, Lutris, Heroic),

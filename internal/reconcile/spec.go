@@ -33,6 +33,7 @@ type Config struct {
 	BridgeImage     string // image:tag
 	ImagePullPolicy string
 	RuntimeClass    string
+	PriorityClass   string
 	WolfGPURequest  bool
 	// InputResource is the device plugin's extended resource; when set the
 	// Wolf and app containers request it and get their input devices
@@ -699,6 +700,9 @@ func BuildPod(a *store.App, cfg Config) (*corev1.Pod, error) {
 	}
 	if cfg.RuntimeClass != "" {
 		pod.Spec.RuntimeClassName = ptr.To(cfg.RuntimeClass)
+	}
+	if cfg.PriorityClass != "" {
+		pod.Spec.PriorityClassName = cfg.PriorityClass
 	}
 	return pod, nil
 }

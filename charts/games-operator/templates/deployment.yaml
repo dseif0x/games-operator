@@ -87,6 +87,8 @@ spec:
               value: {{ .Values.apps.pullPolicy | quote }}
             - name: GAMES_OPERATOR_RUNTIME_CLASS
               value: {{ .Values.apps.runtimeClassName | quote }}
+            - name: GAMES_OPERATOR_PRIORITY_CLASS
+              value: {{ .Values.apps.priorityClassName | quote }}
             - name: GAMES_OPERATOR_WOLF_GPU_REQUEST
               value: {{ .Values.apps.wolfGpuRequest | quote }}
             - name: GAMES_OPERATOR_INPUT_RESOURCE
